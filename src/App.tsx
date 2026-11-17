@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AlertCircle, BarChart3, Bell, CalendarDays, Check, CheckCircle2, ChevronDown, CircleDollarSign, CreditCard, Download, FileText, LayoutDashboard, LogOut, LockKeyhole, Menu, Package, Route, Settings, ShieldCheck, Users, Wallet, X } from 'lucide-react';
+import { AlertCircle, BarChart3, Bell, CalendarDays, Check, CheckCircle2, ChevronDown, CircleDollarSign, CreditCard, Download, FileText, LayoutDashboard, LogOut, LockKeyhole, Menu, Package, Plus, Route, Settings, ShieldCheck, Users, Wallet, X } from 'lucide-react';
 import { Loads } from '@/components/Loads';
 import { Drivers } from '@/components/Drivers';
 import type { SupabaseDriver } from '@/components/Drivers';
