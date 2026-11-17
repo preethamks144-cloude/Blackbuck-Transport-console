@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Banknote, Download, Plus, Send, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Panel, Empty, Table, Modal, Select, today, money } from '@/components/ui';
 import type { SupabaseDriver } from '@/components/Drivers';
@@ -30,6 +30,187 @@ export type SupabaseInvoice = {
   paid_amount: number;
   status: string;
 };
+
+export type SupabasePayment = {
+  id: string;
+  invoice_id: string | null;
+  amount: number;
+  payment_type: string;
+  payment_method: string;
+  status: string;
+  reference: string | null;
+  paid_at: string | null;
+  created_at: string;
+};
+
+const BUSINESS = {
+  name: 'Blackbuck Transport',
+  address: 'Gadag, Karnataka',
+  phone: '+91 90000 00000',
+  gstin: 'Not configured',
+};
+
+const methodLabel = (method: string) =>
+  method === 'upi' ? 'UPI' : method === 'qr_code' ? 'QR code' : method === 'net_banking' ? 'Net banking' : method === 'card' ? 'Card' : 'Cash';
+
+const formatDateTime = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}, ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+};
+
+function downloadInvoicePdf(invoice: SupabaseInvoice, payment: SupabasePayment | null) {
+  const rows: [string, string][] = [
+    ['Invoice number', invoice.invoice_number],
+    ['GC number', invoice.gc_number ?? '—'],
+    ['Invoice date', invoice.invoice_date],
+    ['Consignor', invoice.consignor ?? '—'],
+    ['Consignee', invoice.consignee ?? '—'],
+    ['Freight', money(Number(invoice.freight))],
+    ['Hamali', money(Number(invoice.hamali))],
+    ['Other charges', money(Number(invoice.other_charges))],
+    ['GST', money(Number(invoice.gst))],
+    ['Advance', `- ${money(Number(invoice.advance))}`],
+    ['Total amount', money(Number(invoice.total_amount))],
+    ['Paid amount', money(Number(invoice.paid_amount))],
+    ['Balance due', money(Number(invoice.total_amount) - Number(invoice.paid_amount))],
+    ['Status', invoice.status.toUpperCase()],
+  ];
+  if (payment) {
+    rows.push(
+      ['Payment method', methodLabel(payment.payment_method)],
+      ['Transaction ID', payment.reference ?? '—'],
+      ['Paid at', payment.paid_at ? formatDateTime(payment.paid_at) : '—'],
+    );
+  }
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(invoice.invoice_number)}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .brand { color: #e87500; font-weight: bold; }
+  .meta { color: #64748b; font-size: 12px; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  td { border-bottom: 1px solid #e2e8f0; padding: 8px 6px; font-size: 13px; }
+  td.label { color: #64748b; }
+  td.value { text-align: right; font-weight: bold; }
+  .total td { background: #fff7dc; font-size: 15px; }
+</style></head><body>
+<h1><span class="brand">${esc(BUSINESS.name)}</span> — Tax Invoice</h1>
+<p class="meta">${esc(BUSINESS.address)} · ${esc(BUSINESS.phone)} · GSTIN: ${esc(BUSINESS.gstin)}</p>
+<table>
+${rows.map(([label, value]) => `<tr><td class="label">${esc(label)}</td><td class="value">${esc(value)}</td></tr>`).join('')}
+</table>
+<p class="meta" style="margin-top:24px">Computer-generated invoice. Thank you for your business.</p>
+</body></html>`;
+  const win = window.open('', '_blank');
+  if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 400); }
+}
+
+function WhatsAppModal({ invoice, onClose, onSent }: { invoice: SupabaseInvoice; onClose: () => void; onSent: (message: string) => void }) {
+  const [phone, setPhone] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const text = encodeURIComponent(
+    `*${BUSINESS.name} — Invoice ${invoice.invoice_number}*\n` +
+    `Date: ${invoice.invoice_date}\nGC No: ${invoice.gc_number ?? '—'}\n` +
+    `Route: ${invoice.consignor ?? '—'} to ${invoice.consignee ?? '—'}\n` +
+    `Total: ${money(Number(invoice.total_amount))}\nPaid: ${money(Number(invoice.paid_amount))}\n` +
+    `Balance due: ${money(Number(invoice.total_amount) - Number(invoice.paid_amount))}\n` +
+    `Status: ${invoice.status.toUpperCase()}\n\nThank you for your business.`,
+  );
+  const send = () => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) { setError('Enter a valid WhatsApp number with country code, e.g. +91 98765 43210.'); return; }
+    window.open(`https://wa.me/${digits}?text=${text}`, '_blank');
+    setSending(true);
+    onSent(`WhatsApp opened for ${invoice.invoice_number}`);
+    onClose();
+  };
+  return (
+    <Modal title={`Send invoice ${invoice.invoice_number} on WhatsApp`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800">
+          WhatsApp opens with the invoice summary pre-filled. Confirm the recipient and press send in WhatsApp to deliver it to the registered mobile number.
+        </div>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Registered mobile number</span>
+          <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm outline-none focus:border-[#ffb000] focus:bg-white" />
+        </label>
+        {error && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        <button onClick={send} disabled={sending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] py-3 font-bold text-white disabled:opacity-60">
+          <Send size={16} />Open WhatsApp
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function PaymentModal({ invoice, onClose, onDone }: { invoice: SupabaseInvoice; onClose: () => void; onDone: (message: string) => void }) {
+  const [method, setMethod] = useState('upi');
+  const [reference, setReference] = useState('');
+  const [amount, setAmount] = useState(String(Number(invoice.total_amount) - Number(invoice.paid_amount)));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const value = Number(amount);
+    if (!reference.trim()) { setError('Enter the transaction ID from your payment app or bank statement.'); return; }
+    if (!Number.isFinite(value) || value <= 0) { setError('Enter a valid payment amount.'); return; }
+    setSaving(true);
+    const paidAt = new Date().toISOString();
+    const newPaid = Number(invoice.paid_amount) + value;
+    const newStatus = newPaid >= Number(invoice.total_amount) ? 'paid' : 'partially_paid';
+    const { error: paymentError } = await supabase.from('payments').insert({
+      invoice_id: invoice.id,
+      amount: value,
+      payment_type: 'freight_settlement',
+      payment_method: method,
+      status: 'verified',
+      reference: reference.trim(),
+      paid_at: paidAt,
+    });
+    if (paymentError) { setError(paymentError.message || 'Could not save the payment.'); setSaving(false); return; }
+    const { error: invoiceError } = await supabase.from('invoices')
+      .update({ paid_amount: newPaid, status: newStatus })
+      .eq('id', invoice.id);
+    setSaving(false);
+    if (invoiceError) { setError('Payment saved but the invoice total could not be updated.'); return; }
+    onDone(`Payment of ${money(value)} recorded for ${invoice.invoice_number}`);
+    onClose();
+  };
+  return (
+    <Modal title={`Record payment — ${invoice.invoice_number}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select label="Payment method" value={method} onChange={setMethod}>
+            <option value="upi">UPI</option>
+            <option value="qr_code">QR code</option>
+            <option value="net_banking">Net banking</option>
+            <option value="card">Card</option>
+            <option value="cash">Cash</option>
+          </Select>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Amount (₹)</span>
+            <input required type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm outline-none focus:border-[#ffb000] focus:bg-white" />
+          </label>
+        </div>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Transaction ID</span>
+          <input required value={reference} onChange={e => setReference(e.target.value)} placeholder="e.g. UPI4821XXXX2103"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm outline-none focus:border-[#ffb000] focus:bg-white" />
+        </label>
+        {error && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        <button disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ffb000] py-3 font-bold disabled:opacity-60">
+          <Banknote size={16} />{saving ? 'Saving...' : 'Save payment'}
+        </button>
+      </form>
+    </Modal>
+  );
+}
 
 type SupabaseLoadLite = { id: string; from_city: string; to_city: string; goods: string; price: number; status: string | null };
 
@@ -198,8 +379,11 @@ type InvoicesProps = { onUpdate: (message: string) => void };
 
 export function Invoices({ onUpdate }: InvoicesProps) {
   const [invoices, setInvoices] = useState<SupabaseInvoice[]>([]);
+  const [payments, setPayments] = useState<SupabasePayment[]>([]);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<SupabaseInvoice | null>(null);
+  const [payTarget, setPayTarget] = useState<SupabaseInvoice | null>(null);
+  const [whatsappTarget, setWhatsappTarget] = useState<SupabaseInvoice | null>(null);
 
   const fetchInvoices = async () => {
     const { data, error: fetchError } = await supabase
@@ -211,18 +395,28 @@ export function Invoices({ onUpdate }: InvoicesProps) {
     setError('');
   };
 
+  const fetchPayments = async () => {
+    const { data, error: fetchError } = await supabase
+      .from('payments')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (fetchError) return;
+    setPayments((data ?? []) as SupabasePayment[]);
+  };
+
+  useEffect(() => { void fetchInvoices(); void fetchPayments(); }, []);
+
   useEffect(() => { void fetchInvoices(); }, []);
 
-  const recordPayment = async (invoice: SupabaseInvoice) => {
-    const nextStatus = invoice.status === 'paid' ? 'pending' : 'paid';
-    const paidAmount = nextStatus === 'paid' ? invoice.total_amount : 0;
-    const { error: updateError } = await supabase
-      .from('invoices')
-      .update({ status: nextStatus, paid_amount: paidAmount })
-      .eq('id', invoice.id);
-    if (updateError) { setError('Could not update the invoice.'); return; }
-    onUpdate(nextStatus === 'paid' ? 'Payment recorded' : 'Invoice reopened');
+  const latestPaymentFor = (invoiceId: string) =>
+    payments.find(p => p.invoice_id === invoiceId) ?? null;
+
+  const openPaymentModal = (invoice: SupabaseInvoice) => { setError(''); setPayTarget(invoice); };
+
+  const onPaymentDone = (message: string) => {
+    onUpdate(message);
     void fetchInvoices();
+    void fetchPayments();
   };
 
   const badge = (status: string) =>
@@ -237,7 +431,7 @@ export function Invoices({ onUpdate }: InvoicesProps) {
         <h2 className="heading mt-1 text-3xl font-bold">Invoices & Payments</h2>
       </div>
       <Panel title="Invoice history" action={
-        <button onClick={() => void fetchInvoices()} className="text-xs font-bold text-[#e87500]">Refresh</button>
+        <button onClick={() => { void fetchInvoices(); void fetchPayments(); }} className="text-xs font-bold text-[#e87500]">Refresh</button>
       }>
         {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
         {invoices.length ? (
@@ -247,27 +441,39 @@ export function Invoices({ onUpdate }: InvoicesProps) {
               <th className="px-4 py-3">GC no.</th>
               <th className="px-4 py-3">Date</th>
               <th className="px-4 py-3">Total</th>
+              <th className="px-4 py-3">Transaction ID</th>
               <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Action</th>
+              <th className="px-4 py-3">Actions</th>
             </tr>
-            {invoices.map(x => (
-              <tr key={x.id} className="border-t border-slate-100">
-                <td className="px-4 py-3 font-bold">{x.invoice_number}</td>
-                <td className="px-4 py-3">{x.gc_number ?? '—'}</td>
-                <td className="px-4 py-3">{x.invoice_date}</td>
-                <td className="px-4 py-3">{money(x.total_amount)}</td>
-                <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${badge(x.status)}`}>{x.status}</span></td>
-                <td className="flex gap-2 px-4 py-3">
-                  <button onClick={() => setPreview(x)} className="rounded-lg border px-3 py-1.5 text-xs font-bold">View</button>
-                  <button onClick={() => void recordPayment(x)} className="rounded-lg border px-3 py-1.5 text-xs font-bold">
-                    {x.status === 'paid' ? 'Reopen' : 'Record payment'}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {invoices.map(x => {
+              const payment = latestPaymentFor(x.id);
+              return (
+                <tr key={x.id} className="border-t border-slate-100">
+                  <td className="px-4 py-3 font-bold">{x.invoice_number}</td>
+                  <td className="px-4 py-3">{x.gc_number ?? '—'}</td>
+                  <td className="px-4 py-3">{x.invoice_date}</td>
+                  <td className="px-4 py-3">{money(x.total_amount)}</td>
+                  <td className="px-4 py-3">{payment?.reference ?? '—'}</td>
+                  <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${badge(x.status)}`}>{x.status}</span></td>
+                  <td className="flex flex-wrap gap-2 px-4 py-3">
+                    <button onClick={() => setPreview(x)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">View</button>
+                    <button onClick={() => downloadInvoicePdf(x, payment)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">PDF</button>
+                    <button onClick={() => setWhatsappTarget(x)} className="flex items-center gap-1 rounded-lg bg-[#25D366] px-2.5 py-1.5 text-xs font-bold text-white"><Send size={12} />WhatsApp</button>
+                    {x.status !== 'paid' && <button onClick={() => openPaymentModal(x)} className="rounded-lg bg-[#ffb000] px-2.5 py-1.5 text-xs font-bold">Record payment</button>}
+                  </td>
+                </tr>
+              );
+            })}
           </Table>
         ) : <Empty label="Invoices are created automatically when trips are completed." />}
       </Panel>
+
+      {whatsappTarget && (
+        <WhatsAppModal invoice={whatsappTarget} onClose={() => setWhatsappTarget(null)} onSent={onUpdate} />
+      )}
+      {payTarget && (
+        <PaymentModal invoice={payTarget} onClose={() => setPayTarget(null)} onDone={onPaymentDone} />
+      )}
 
       {preview && (
         <Modal title={`Invoice ${preview.invoice_number}`} onClose={() => setPreview(null)}>
@@ -293,6 +499,25 @@ export function Invoices({ onUpdate }: InvoicesProps) {
               <div className="flex justify-between bg-[#fff7dc] px-4 py-3 text-base">
                 <span className="font-bold">Total payable</span><span className="font-bold">{money(Number(preview.total_amount))}</span>
               </div>
+            </div>
+            {(() => {
+              const payment = latestPaymentFor(preview.id);
+              if (!payment) return <div className="rounded-xl bg-slate-50 p-4 text-slate-500">No payment recorded yet for this invoice.</div>;
+              return (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                  <p className="text-xs font-bold uppercase text-emerald-700">Latest payment</p>
+                  <div className="mt-2 grid grid-cols-2 gap-3">
+                    <div><p className="text-xs text-emerald-700">Method</p><p className="font-semibold">{methodLabel(payment.payment_method)}</p></div>
+                    <div><p className="text-xs text-emerald-700">Transaction ID</p><p className="font-semibold">{payment.reference ?? '—'}</p></div>
+                    <div><p className="text-xs text-emerald-700">Date &amp; time</p><p className="font-semibold">{payment.paid_at ? formatDateTime(payment.paid_at) : '—'}</p></div>
+                    <div><p className="text-xs text-emerald-700">Amount</p><p className="font-semibold">{money(Number(payment.amount))}</p></div>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="flex flex-wrap gap-3">
+              <button onClick={() => downloadInvoicePdf(preview, latestPaymentFor(preview.id))} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#050505] py-3 text-sm font-bold text-white"><Download size={16} />Download PDF</button>
+              <button onClick={() => { setWhatsappTarget(preview); setPreview(null); }} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#25D366] py-3 text-sm font-bold text-white"><Send size={16} />Send on WhatsApp</button>
             </div>
           </div>
         </Modal>
