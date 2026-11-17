@@ -8,7 +8,7 @@ import { Trips, Invoices } from '@/components/Trips';
 import type { SupabaseTrip, SupabaseInvoice } from '@/components/Trips';
 import type { LiveLoad } from '@/components/Loads';
 import { supabase } from '@/lib/supabase';
-import { Panel, Empty, Table, Field, money } from '@/components/ui';
+import { Panel, Empty, Table, Field, Modal, Select, today, money } from '@/components/ui';
 
 type Page = 'dashboard' | 'profile' | 'loads' | 'drivers' | 'trips' | 'subscriptions' | 'invoices' | 'payments' | 'reports' | 'notifications' | 'settings';
 type Notice = { id: string; title: string; text: string; read: boolean; date: string };
@@ -24,7 +24,6 @@ const nav: { id: Page; label: string; icon: LucideIcon }[] = [
 const tone = (status: string) => ['active', 'completed', 'paid', 'confirmed'].includes(status) ? 'green' : ['published', 'pending', 'ongoing', 'assigned', 'available'].includes(status) ? 'yellow' : ['expired', 'overdue', 'cancelled', 'restricted'].includes(status) ? 'red' : 'neutral';
 
 type LiveDrivers = { drivers: SupabaseDriver[]; trips: SupabaseTrip[]; invoices: SupabaseInvoice[] };
-type DriverStatus = SupabaseDriver['account_status'];
 
 function Logo() { return <svg className="h-11 w-[190px] rounded bg-white px-1" viewBox="0 0 2048 684" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Blackbuck Transport logo"><rect width="2048" height="684" fill="transparent" /><g transform="translate(0 35) scale(1.55)"><path fill="#050505" fillRule="evenodd" d="M574,118 L567,112 L547,100 L534,87 L526,83 L518,82 L507,65 L494,53 L477,45 L464,35 L450,29 L430,17 L443,30 L466,46 L472,52 L483,57 L492,63 L509,80 L515,81 L514,82 L502,82 L482,67 L459,58 L443,59 L435,52 L409,51 L389,46 L372,40 L379,45 L406,57 L419,60 L431,60 L438,67 L441,68 L455,68 L456,67 L480,82 L483,86 L482,87 L472,84 L453,84 L441,86 L453,96 L466,100 L472,100 L474,102 L459,113 L417,155 L388,167 L363,175 L337,181 L301,186 L263,188 L244,191 L225,197 L214,203 L202,205 L187,205 L172,201 L173,207 L177,212 L186,216 L195,217 L184,232 L176,248 L165,259 L148,268 L134,272 L126,272 L118,274 L91,310 L75,325 L68,328 L63,333 L60,340 L48,351 L41,360 L40,364 L50,363 L78,347 L96,334 L131,304 L143,296 L151,292 L168,287 L187,284 L208,283 L226,278 L243,267 L259,253 L271,248 L283,246 L310,246 L375,254 L397,253 L414,249 L405,248 L399,250 L381,250 L359,247 L320,237 L299,234 L297,232 L303,230 L334,230 L358,233 L391,233 L403,228 L414,244 L420,247 L433,248 L460,242 L501,228 L513,226 L514,227 L511,233 L495,254 L480,269 L473,270 L471,273 L460,277 L449,290 L445,300 L450,299 L473,287 L489,275 L492,276 L491,278 L491,284 L504,277 L516,267 L552,221 L553,210 L548,203 L539,199 L514,201 L481,207 L467,208 L466,210 L486,209 L502,211 L497,213 L489,213 L464,218 L440,226 L439,223 L445,214 L451,200 L451,191 L445,176 L447,175 L454,180 L458,181 L464,169 L480,144 L497,124 L503,128 L512,131 L541,129 L559,132 L564,130 L573,123 Z M522,241 L523,242 L509,261 L505,261 L504,259 Z M307,195 L296,197 L269,198 L243,203 L223,210 L210,217 L201,224 L199,223 L205,215 L219,203 L238,195 L256,192 L296,192 L305,193 Z M491,110 L492,109 L496,112 L509,116 L533,116 L546,118 L560,118 L568,126 L561,131 L554,131 L551,129 L549,130 L546,129 L510,129 L500,125 L494,119 L491,113 Z M513,93 L514,92 L525,93 L529,96 L530,99 L528,101 L521,100 Z" /><g fill="#FFB000" fillRule="evenodd"><path d="M302,232 L315,234 L328,238 L344,239 L366,239 L345,236 L331,232 Z" /><path d="M513,132 L509,132 L503,129 L493,143 L479,172 L467,206 L478,205 L494,165 L504,145 Z" /><path d="M385,132 L346,127 L298,128 L267,133 L247,138 L221,147 L187,164 L160,184 L139,205 L130,216 L119,233 L140,213 L169,192 L195,177 L237,158 L267,148 L312,138 L355,133 L384,133 Z" /><path d="M403,109 L383,103 L350,97 L316,95 L288,94 L256,97 L224,103 L205,108 L166,122 L141,134 L115,150 L91,169 L74,186 L60,203 L43,229 L28,259 L22,276 L33,259 L54,232 L88,198 L115,177 L137,163 L187,138 L216,127 L243,119 L275,112 L315,107 L333,107 L366,106 L387,107 Z" /></g></g><text x="965" y="358" fill="#050505" fontFamily="Arial, Helvetica, sans-serif" fontSize="190" fontWeight="900" fontStyle="italic" letterSpacing="-8">Blackbuck</text><text x="965" y="538" fill="#FFB000" fontFamily="Arial, Helvetica, sans-serif" fontSize="190" fontWeight="900" fontStyle="italic" letterSpacing="-9">Transport</text></svg> }
 function Badge({ children }: { children: string }) { const styles = { green: 'bg-emerald-100 text-emerald-700', yellow: 'bg-amber-100 text-amber-700', red: 'bg-red-100 text-red-700', neutral: 'bg-slate-100 text-slate-600' }; const kind = tone(children) as keyof typeof styles; return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${styles[kind]}`}>{children.replace('_', ' ')}</span> }
@@ -39,7 +38,85 @@ function ProfilePage({ adminName, onNameChange }: { adminName: string; onNameCha
 
 function Dashboard({ data, loads, adminName, loading, error }: { data: LiveDrivers; loads: LiveLoad[]; adminName: string; loading: boolean; error: string }) { const paid = data.invoices.reduce((sum, item) => sum + item.paid_amount, 0); const activeLoads = loads.filter(x => ['Available', 'Confirmed'].includes(x.status ?? 'Available')).length; return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Operations overview</p><h2 className="heading mt-1 text-3xl font-bold">Good morning, {adminName.split(' ')[0]}.</h2><p className="mt-1 text-sm text-slate-500">Live figures from your Supabase database.</p></div>{error && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric icon={Users} label="Registered drivers" value={loading ? '…' : data.drivers.length} /><Metric icon={Package} label="Active loads" value={loading ? '…' : activeLoads} accent="blue" /><Metric icon={Route} label="Active trips" value={loading ? '…' : data.trips.filter(x => ['assigned', 'ongoing'].includes(x.status)).length} accent="green" /><Metric icon={CircleDollarSign} label="Paid revenue" value={loading ? '…' : money(paid)} /></div><div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]"><Panel title="Recent load activity">{loading ? <Empty label="Loading live data..." /> : loads.length ? <Table><tr><th className="px-4 py-3">Route</th><th className="px-4 py-3">Goods</th><th className="px-4 py-3">Price</th><th className="px-4 py-3">Status</th></tr>{loads.slice(0, 5).map(x => <tr key={x.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold">{x.from_city} → {x.to_city}</td><td className="px-4 py-3">{x.goods}</td><td className="px-4 py-3">{money(Number(x.price))}</td><td className="px-4 py-3"><Badge>{(x.status ?? 'Available').toLowerCase()}</Badge></td></tr>)}</Table> : <Empty label="No load activity yet" />}</Panel><Panel title="Workspace readiness"><div className="space-y-3"><div className="rounded-xl bg-emerald-50 p-4"><p className="font-bold text-emerald-800">Supabase connected</p><p className="mt-1 text-sm text-emerald-700">Loads, drivers, trips and invoices are saved in your database and reload from it on every visit.</p></div><div className="rounded-xl bg-[#fff7dc] p-4 text-sm text-slate-600"><AlertCircle className="mr-2 inline text-[#e87500]" size={16} />Start by posting a load or adding a driver.</div></div></Panel></div></div> }
 
-function Subscriptions({ drivers, onUpdate, refresh }: { drivers: SupabaseDriver[]; onUpdate: (m: string) => void; refresh: () => void }) { const [busy, setBusy] = useState(''); const toggle = async (driver: SupabaseDriver) => { setBusy(driver.id); const next: DriverStatus = driver.account_status === 'active' ? 'inactive' : 'active'; const { error } = await supabase.from('drivers').update({ account_status: next }).eq('id', driver.id); setBusy(''); if (error) { onUpdate('Could not update the subscription status.'); return; } onUpdate('Subscription status updated'); refresh(); }; return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Membership revenue</p><h2 className="heading mt-1 text-3xl font-bold">Subscription Management</h2></div><div className="grid gap-4 sm:grid-cols-3"><Metric icon={Users} label="Total members" value={drivers.length} /><Metric icon={CalendarDays} label="Active subscriptions" value={drivers.filter(x => x.account_status === 'active').length} accent="green" /><Metric icon={AlertCircle} label="Expired / restricted" value={drivers.filter(x => x.account_status !== 'active').length} accent="blue" /></div><Panel title="Subscription status">{drivers.length ? <Table><tr><th className="px-4 py-3">Name</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Action</th></tr>{drivers.map(x => <tr key={x.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold">{x.full_name}</td><td className="px-4 py-3">{x.phone}</td><td className="px-4 py-3"><Badge>{x.account_status}</Badge></td><td className="px-4 py-3"><button disabled={busy === x.id} onClick={() => void toggle(x)} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-60">{busy === x.id ? 'Saving...' : 'Toggle status'}</button></td></tr>)}</Table> : <Empty label="Add a driver first to manage subscriptions." />}</Panel></div> }
+export type SupabaseSubscription = {
+  id: string;
+  driver_id: string;
+  plan_name: string;
+  price: number;
+  starts_at: string | null;
+  ends_at: string;
+  status: string;
+  payment_reference: string | null;
+};
+
+function Subscriptions({ drivers, onUpdate, refresh }: { drivers: SupabaseDriver[]; onUpdate: (m: string) => void; refresh: () => void }) {
+  const [subs, setSubs] = useState<SupabaseSubscription[]>([]);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [form, setForm] = useState({ driver_id: '', plan_name: 'Monthly Membership', price: '1000', ends_at: '' });
+  const [confirmId, setConfirmId] = useState('');
+
+  const fetchSubs = async () => {
+    const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false });
+    if (error) { onUpdate('Subscription data could not be loaded.'); return; }
+    setSubs((data ?? []) as SupabaseSubscription[]);
+  };
+
+  useEffect(() => { void fetchSubs(); }, []);
+
+  const driverName = (driverId: string) => drivers.find(x => x.id === driverId)?.full_name ?? 'Unknown driver';
+  const driverPhone = (driverId: string) => drivers.find(x => x.id === driverId)?.phone ?? '—';
+  const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const badge = (status: string) =>
+    status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
+    status === 'Expired' ? 'bg-red-100 text-red-700' :
+    'bg-amber-100 text-amber-700';
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+    if (!form.driver_id) { setFormError('Select the driver who is subscribing.'); return; }
+    if (!form.ends_at) { setFormError('Choose the membership end date.'); return; }
+    setSaving(true);
+    const { error } = await supabase.from('subscriptions').insert({
+      driver_id: form.driver_id,
+      plan_name: form.plan_name,
+      price: Number(form.price),
+      starts_at: new Date().toISOString(),
+      ends_at: new Date(`${form.ends_at}T23:59:59`).toISOString(),
+      status: 'Pending',
+    });
+    setSaving(false);
+    if (error) { setFormError(error.message || 'Could not create the subscription.'); return; }
+    onUpdate('Subscription created');
+    setForm({ driver_id: '', plan_name: 'Monthly Membership', price: '1000', ends_at: '' });
+    setOpen(false);
+    void fetchSubs();
+    refresh();
+  };
+
+  const setStatus = async (sub: SupabaseSubscription, status: string) => {
+    const { error } = await supabase.from('subscriptions').update({ status }).eq('id', sub.id);
+    if (error) { onUpdate('Could not update the subscription.'); return; }
+    onUpdate(`Subscription marked ${status.toLowerCase()}`);
+    void fetchSubs();
+    refresh();
+  };
+
+  const remove = async (sub: SupabaseSubscription) => {
+    const { error } = await supabase.from('subscriptions').delete().eq('id', sub.id);
+    setConfirmId('');
+    if (error) { onUpdate('Could not remove the subscription.'); return; }
+    onUpdate('Subscription removed');
+    void fetchSubs();
+    refresh();
+  };
+
+  const total = subs.reduce((sum, x) => sum + Number(x.price), 0);
+
+  return <div className="space-y-6"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold text-[#e87500]">Membership revenue</p><h2 className="heading mt-1 text-3xl font-bold">Subscription Management</h2></div><button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-xl bg-[#ffb000] px-4 py-3 text-sm font-bold"><Plus size={17} />New subscription</button></div><div className="grid gap-4 sm:grid-cols-3"><Metric icon={CreditCard} label="Total subscriptions" value={subs.length} /><Metric icon={CalendarDays} label="Active plans" value={subs.filter(x => x.status === 'Active').length} accent="green" /><Metric icon={CircleDollarSign} label="Plan value" value={money(total)} accent="blue" /></div><Panel title="Subscription records" action={<button onClick={() => void fetchSubs()} className="text-xs font-bold text-[#e87500]">Refresh</button>}>{formError && !open && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>}{subs.length ? <Table><tr><th className="px-4 py-3">Driver</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Price</th><th className="px-4 py-3">Starts</th><th className="px-4 py-3">Ends</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actions</th></tr>{subs.map(x => <tr key={x.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold">{driverName(x.driver_id)}</td><td className="px-4 py-3">{driverPhone(x.driver_id)}</td><td className="px-4 py-3">{x.plan_name}</td><td className="px-4 py-3">{money(Number(x.price))}</td><td className="px-4 py-3">{fmt(x.starts_at)}</td><td className="px-4 py-3">{fmt(x.ends_at)}</td><td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${badge(x.status)}`}>{x.status}</span></td><td className="flex flex-wrap gap-2 px-4 py-3">{x.status === 'Pending' && <button onClick={() => void setStatus(x, 'Active')} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white">Activate</button>}{x.status === 'Active' && <button onClick={() => void setStatus(x, 'Expired')} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Mark expired</button>}{confirmId === x.id ? <button onClick={() => void remove(x)} className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white">Confirm remove</button> : <button onClick={() => setConfirmId(x.id)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Remove</button>}</td></tr>)}</Table> : <Empty label="No subscriptions yet. Create one for a driver to begin." />}</Panel>{open && <Modal title="New subscription" onClose={() => setOpen(false)}><form onSubmit={submit} className="space-y-4"><Select label="Driver" value={form.driver_id} onChange={v => setForm({ ...form, driver_id: v })}><option value="">Select a driver</option>{drivers.map(x => <option key={x.id} value={x.id}>{x.full_name} ({x.phone})</option>)}</Select><Field label="Plan name" value={form.plan_name} onChange={v => setForm({ ...form, plan_name: v })} placeholder="Monthly Membership" /><Field label="Price (₹)" value={form.price} onChange={v => setForm({ ...form, price: v })} placeholder="1000" type="number" /><Field label="Membership ends on" value={form.ends_at} onChange={v => setForm({ ...form, ends_at: v })} placeholder={today()} type="date" />{formError && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</div>}<button disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ffb000] py-3 font-bold disabled:opacity-60">{saving ? 'Saving...' : 'Create subscription'}</button></form></Modal>}{confirmId && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"><h2 className="heading text-xl font-bold">Remove this subscription?</h2><p className="mt-2 text-sm leading-6 text-slate-500">The subscription record will be deleted from the database. This cannot be undone.</p><div className="mt-6 flex gap-3"><button onClick={() => setConfirmId('')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold">Cancel</button><button onClick={() => { const sub = subs.find(x => x.id === confirmId); if (sub) void remove(sub); }} className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-bold text-white">Remove</button></div></div></div>}</div>
+}
 
 function Payments({ invoices }: { invoices: SupabaseInvoice[] }) { const total = invoices.reduce((sum, x) => sum + x.paid_amount, 0); const due = invoices.reduce((sum, x) => sum + x.total_amount - x.paid_amount, 0); return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Collections overview</p><h2 className="heading mt-1 text-3xl font-bold">Payments & Reconciliation</h2></div><div className="grid gap-4 sm:grid-cols-3"><Metric icon={CircleDollarSign} label="Collected" value={money(total)} accent="green" /><Metric icon={AlertCircle} label="Outstanding" value={money(due)} accent="blue" /><Metric icon={Wallet} label="Invoices" value={invoices.length} /></div><Panel title="Recorded payments">{invoices.length ? <Table><tr><th className="px-4 py-3">Invoice no.</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Total</th><th className="px-4 py-3">Paid</th><th className="px-4 py-3">Status</th></tr>{invoices.map(x => <tr key={x.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold">{x.invoice_number}</td><td className="px-4 py-3">{x.invoice_date}</td><td className="px-4 py-3">{money(x.total_amount)}</td><td className="px-4 py-3">{money(x.paid_amount)}</td><td className="px-4 py-3"><Badge>{x.status}</Badge></td></tr>)}</Table> : <Empty label="No invoices yet. Complete a trip to generate one." />}</Panel></div> }
 
