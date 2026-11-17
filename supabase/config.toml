@@ -1,0 +1,4 @@
+project_id = "bflwacmrohgykyrxtdgn"
+
+[functions.send-invoice-whatsapp]
+verify_jwt = false

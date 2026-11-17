@@ -1,0 +1,9 @@
+{
+  "projectId": "72976240",
+  "functions": {
+    "send-invoice-whatsapp": {
+      "hasChanged": false,
+      "hash": "b10e87f501f90a36c9f2cd4e2b35111d7434894439fc867ef9a6d78b409f16eb"
+    }
+  }
+}

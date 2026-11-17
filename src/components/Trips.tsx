@@ -111,27 +111,36 @@ function WhatsAppModal({ invoice, onClose, onSent }: { invoice: SupabaseInvoice;
   const [phone, setPhone] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
-  const text = encodeURIComponent(
-    `*${BUSINESS.name} — Invoice ${invoice.invoice_number}*\n` +
-    `Date: ${invoice.invoice_date}\nGC No: ${invoice.gc_number ?? '—'}\n` +
-    `Route: ${invoice.consignor ?? '—'} to ${invoice.consignee ?? '—'}\n` +
-    `Total: ${money(Number(invoice.total_amount))}\nPaid: ${money(Number(invoice.paid_amount))}\n` +
-    `Balance due: ${money(Number(invoice.total_amount) - Number(invoice.paid_amount))}\n` +
-    `Status: ${invoice.status.toUpperCase()}\n\nThank you for your business.`,
-  );
-  const send = () => {
+  const send = async () => {
+    setError('');
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 10) { setError('Enter a valid WhatsApp number with country code, e.g. +91 98765 43210.'); return; }
-    window.open(`https://wa.me/${digits}?text=${text}`, '_blank');
     setSending(true);
-    onSent(`WhatsApp opened for ${invoice.invoice_number}`);
-    onClose();
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invoice-whatsapp`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: invoice.id, phone: digits }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) {
+        setError(result.error ?? `WhatsApp could not send the invoice (error ${response.status}).`);
+        setSending(false);
+        return;
+      }
+      onSent(`Invoice ${invoice.invoice_number} sent as PDF on WhatsApp to ${phone}`);
+      setSending(false);
+      onClose();
+    } catch {
+      setError('Could not reach the WhatsApp service. Check your connection and try again.');
+      setSending(false);
+    }
   };
   return (
     <Modal title={`Send invoice ${invoice.invoice_number} on WhatsApp`} onClose={onClose}>
       <div className="space-y-4">
         <div className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800">
-          WhatsApp opens with the invoice summary pre-filled. Confirm the recipient and press send in WhatsApp to deliver it to the registered mobile number.
+          The invoice PDF is delivered as a WhatsApp document message to this number through the official WhatsApp Business API.
         </div>
         <label className="block">
           <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Registered mobile number</span>
@@ -139,8 +148,8 @@ function WhatsAppModal({ invoice, onClose, onSent }: { invoice: SupabaseInvoice;
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm outline-none focus:border-[#ffb000] focus:bg-white" />
         </label>
         {error && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-        <button onClick={send} disabled={sending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] py-3 font-bold text-white disabled:opacity-60">
-          <Send size={16} />Open WhatsApp
+        <button onClick={() => void send()} disabled={sending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] py-3 font-bold text-white disabled:opacity-60">
+          <Send size={16} />{sending ? 'Sending PDF...' : 'Send PDF on WhatsApp'}
         </button>
       </div>
     </Modal>
@@ -405,8 +414,6 @@ export function Invoices({ onUpdate }: InvoicesProps) {
   };
 
   useEffect(() => { void fetchInvoices(); void fetchPayments(); }, []);
-
-  useEffect(() => { void fetchInvoices(); }, []);
 
   const latestPaymentFor = (invoiceId: string) =>
     payments.find(p => p.invoice_id === invoiceId) ?? null;
