@@ -26,10 +26,8 @@ export type LiveLoad = {
   created_at: string;
 };
 
-type Store = { loads: { id: string }[]; drivers: { id: string }[]; trips: { id: string }[]; invoices: { id: string }[]; notifications: Notice[] };
 type Notice = { id: string; title: string; text: string; read: boolean; date: string };
 
-const STORE_KEY = 'blackbuck-local-trial-store';
 const id = () => crypto.randomUUID();
 const today = () => new Date().toISOString().slice(0, 10);
 const money = (value: number) => `₹${value.toLocaleString('en-IN')}`;
@@ -142,14 +140,7 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
     const { error } = await supabase.from('loads').insert(payload);
     setSaving(false);
     if (error) { setFormError(error.message || 'Could not save the load.'); return; }
-    const existing = JSON.parse(localStorage.getItem(STORE_KEY) || '{"notifications":[]}') as Store;
-    update({
-      notifications: [{
-        id: id(), title: 'New load posted',
-        text: `${form.from_city} → ${form.to_city} (${form.goods}) is now available.`,
-        read: false, date: today(),
-      }, ...existing.notifications],
-    }, 'Load posted to Supabase');
+    update({}, 'Load posted to Supabase');
     setForm({ ...emptyForm });
     setOpen(false);
     void fetchLoads();
