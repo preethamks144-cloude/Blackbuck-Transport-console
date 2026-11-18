@@ -11,11 +11,10 @@ import { supabase } from '@/lib/supabase';
 import { Panel, Empty, Table, Field, Modal, Select, today, money } from '@/components/ui';
 
 type Page = 'dashboard' | 'profile' | 'loads' | 'drivers' | 'trips' | 'subscriptions' | 'invoices' | 'payments' | 'reports' | 'notifications' | 'settings';
-type Notice = { id: string; title: string; text: string; read: boolean; date: string };
+type DbNotification = { id: string; title: string; message: string; category: string; is_read: boolean; created_at: string };
 
 const LOGIN_EMAIL = 'preethamks@gmail.com';
 const LOGIN_PASSWORD = 'preethu@123';
-const NOTICES_KEY = 'blackbuck-notices';
 const SESSION_KEY = 'blackbuck-local-trial-session';
 const NAME_KEY = 'blackbuck-admin-name';
 const nav: { id: Page; label: string; icon: LucideIcon }[] = [
@@ -369,11 +368,106 @@ function Payments({ invoices }: { invoices: SupabaseInvoice[] }) {
   </div>
 }
 
-function Reports({ data, loads, onUpdate }: { data: LiveDrivers; loads: LiveLoad[]; onUpdate: (m: string) => void }) { const values = [loads.length, data.trips.filter(x => x.status === 'completed').length, data.invoices.reduce((s, x) => s + x.total_amount, 0)]; return <div className="space-y-6"><div className="flex items-end justify-between"><div><p className="text-sm font-semibold text-[#e87500]">Live database records</p><h2 className="heading mt-1 text-3xl font-bold">Reports & Analytics</h2></div><button onClick={() => { const csv = `Metric,Value\nTotal loads,${values[0]}\nCompleted trips,${values[1]}\nInvoice value,${values[2]}`; const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); const link = document.createElement('a'); link.href = url; link.download = 'blackbuck-report.csv'; link.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold"><Download size={16} />Export CSV</button></div><div className="grid gap-4 md:grid-cols-3"><Metric icon={Package} label="Total loads" value={values[0]} /><Metric icon={Route} label="Completed trips" value={values[1]} /><Metric icon={CircleDollarSign} label="Invoice value" value={money(values[2])} /></div><Panel title="Records overview"><div className="grid gap-4 sm:grid-cols-2"><div className="rounded-xl bg-slate-50 p-5"><p className="text-sm text-slate-500">Drivers with access</p><p className="heading mt-2 text-3xl font-bold">{data.drivers.filter(x => x.account_status === 'active').length}</p></div><div className="rounded-xl bg-slate-50 p-5"><p className="text-sm text-slate-500">Available loads</p><p className="heading mt-2 text-3xl font-bold">{loads.filter(x => (x.status ?? 'Available') === 'Available').length}</p></div></div></Panel><button onClick={() => onUpdate('Report figures refreshed from the database')} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold">Refresh figures</button></div> }
+function Reports({ data, loads, onRefresh, onUpdate }: { data: LiveDrivers; loads: LiveLoad[]; onRefresh: () => void; onUpdate: (m: string) => void }) {
+  const loadsByStatus = {
+    Available: loads.filter(x => (x.status ?? 'Available') === 'Available').length,
+    Confirmed: loads.filter(x => x.status === 'Confirmed').length,
+    Archived: loads.filter(x => x.status === 'Archived').length,
+  };
+  const tripsByStatus = {
+    assigned: data.trips.filter(x => x.status === 'assigned').length,
+    ongoing: data.trips.filter(x => x.status === 'ongoing').length,
+    completed: data.trips.filter(x => x.status === 'completed').length,
+    cancelled: data.trips.filter(x => x.status === 'cancelled').length,
+  };
+  const invoiceTotal = data.invoices.reduce((s, x) => s + Number(x.total_amount), 0);
+  const invoicePaid = data.invoices.reduce((s, x) => s + Number(x.paid_amount), 0);
+  const invoiceOutstanding = invoiceTotal - invoicePaid;
+  const activeSubs = data.subs.filter(x => x.status === 'Active').length;
+  const pendingSubs = data.subs.filter(x => x.status === 'Pending').length;
+  const expiredSubs = data.subs.filter(x => x.status === 'Expired').length;
+  const subValue = data.subs.filter(x => x.status === 'Active').reduce((s, x) => s + Number(x.price), 0);
 
-function NotificationDrawer({ notices, update, onClose }: { notices: Notice[]; update: (x: Partial<{ notifications: Notice[] }>, m: string) => void; onClose: () => void }) { const unread = notices.filter(x => !x.read); const mark = (notice: Notice) => update({ notifications: notices.map(x => x.id === notice.id ? { ...x, read: true } : x) }, 'Notification marked read'); return <div className="fixed inset-0 z-40"><button onClick={onClose} className="absolute inset-0 bg-black/30" aria-label="Close notifications" /><aside className="absolute right-0 top-0 h-full w-full max-w-[420px] overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 pb-4"><div><p className="text-xs font-bold uppercase tracking-wide text-[#e87500]">Updates</p><h2 className="heading mt-1 text-xl font-bold">Notifications</h2></div><button onClick={onClose} className="rounded-lg p-2 hover:bg-slate-100"><X size={18} /></button></div><div className="mt-4 flex items-center justify-between"><p className="text-sm text-slate-500">{unread.length} unread</p><button onClick={() => update({ notifications: notices.map(x => ({ ...x, read: true })) }, 'All notifications marked read')} className="text-xs font-bold text-[#e87500]">Mark all read</button></div><div className="mt-4 space-y-3">{notices.length ? notices.map(x => <div key={x.id} className={`rounded-xl border p-4 ${x.read ? 'border-slate-100 bg-slate-50' : 'border-amber-100 bg-[#fffaf0]'}`}><div className="flex items-start justify-between gap-3"><div><p className="font-bold">{x.title}</p><p className="mt-1 text-sm text-slate-500">{x.text}</p><p className="mt-2 text-xs text-slate-400">{x.date}</p></div>{!x.read && <button onClick={() => mark(x)} className="rounded-lg border bg-white p-2"><Check size={15} /></button>}</div></div>) : <Empty label="No notifications yet" />}</div><button onClick={onClose} className="mt-6 w-full rounded-xl border border-slate-200 py-3 text-sm font-bold">Close</button></aside></div> }
+  const exportCsv = () => {
+    const lines = ['Section,Metric,Value'];
+    lines.push(`Loads,Total,${loads.length}`);
+    lines.push(`Loads,Available,${loadsByStatus.Available}`);
+    lines.push(`Loads,Confirmed,${loadsByStatus.Confirmed}`);
+    lines.push(`Loads,Archived,${loadsByStatus.Archived}`);
+    lines.push(`Trips,Total,${data.trips.length}`);
+    lines.push(`Trips,Assigned,${tripsByStatus.assigned}`);
+    lines.push(`Trips,Ongoing,${tripsByStatus.ongoing}`);
+    lines.push(`Trips,Completed,${tripsByStatus.completed}`);
+    lines.push(`Trips,Cancelled,${tripsByStatus.cancelled}`);
+    lines.push(`Drivers,Total,${data.drivers.length}`);
+    lines.push(`Drivers,Active,${data.drivers.filter(x => x.account_status === 'active').length}`);
+    lines.push(`Drivers,Restricted,${data.drivers.filter(x => x.account_status === 'restricted').length}`);
+    lines.push(`Invoices,Total invoices,${data.invoices.length}`);
+    lines.push(`Invoices,Invoice value,${invoiceTotal}`);
+    lines.push(`Invoices,Paid,${invoicePaid}`);
+    lines.push(`Invoices,Outstanding,${invoiceOutstanding}`);
+    lines.push(`Subscriptions,Total,${data.subs.length}`);
+    lines.push(`Subscriptions,Active,${activeSubs}`);
+    lines.push(`Subscriptions,Pending,${pendingSubs}`);
+    lines.push(`Subscriptions,Expired,${expiredSubs}`);
+    lines.push(`Subscriptions,Active value,${subValue}`);
+    const csv = lines.join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'blackbuck-report.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return <div className="space-y-6">
+    <div className="flex items-end justify-between">
+      <div><p className="text-sm font-semibold text-[#e87500]">Live database records</p><h2 className="heading mt-1 text-3xl font-bold">Reports & Analytics</h2></div>
+      <button onClick={exportCsv} className="flex items-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold"><Download size={16} />Export CSV</button>
+    </div>
+    <div className="grid gap-4 md:grid-cols-3">
+      <Metric icon={Package} label="Total loads" value={loads.length} />
+      <Metric icon={Route} label="Completed trips" value={tripsByStatus.completed} accent="green" />
+      <Metric icon={CircleDollarSign} label="Invoice value" value={money(invoiceTotal)} accent="blue" />
+    </div>
+    <div className="grid gap-6 xl:grid-cols-2">
+      <Panel title="Loads by status">
+        <SectionRow label="Available" value={String(loadsByStatus.Available)} />
+        <SectionRow label="Confirmed" value={String(loadsByStatus.Confirmed)} />
+        <SectionRow label="Archived" value={String(loadsByStatus.Archived)} />
+      </Panel>
+      <Panel title="Trips by status">
+        <SectionRow label="Assigned" value={String(tripsByStatus.assigned)} />
+        <SectionRow label="Ongoing" value={String(tripsByStatus.ongoing)} />
+        <SectionRow label="Completed" value={String(tripsByStatus.completed)} />
+        <SectionRow label="Cancelled" value={String(tripsByStatus.cancelled)} />
+      </Panel>
+      <Panel title="Revenue breakdown">
+        <SectionRow label="Total invoice value" value={money(invoiceTotal)} />
+        <SectionRow label="Collected" value={money(invoicePaid)} />
+        <SectionRow label="Outstanding" value={money(invoiceOutstanding)} />
+        <SectionRow label="Active subscription value" value={money(subValue)} />
+      </Panel>
+      <Panel title="Subscriptions">
+        <SectionRow label="Active" value={String(activeSubs)} />
+        <SectionRow label="Pending" value={String(pendingSubs)} />
+        <SectionRow label="Expired" value={String(expiredSubs)} />
+      </Panel>
+    </div>
+    <button onClick={() => { onRefresh(); onUpdate('Report figures refreshed from the database'); }} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold">Refresh figures</button>
+  </div>;
+}
+
+function NotificationDrawer({ notifications, onMarkRead, onMarkAllRead, onClose }: { notifications: DbNotification[]; onMarkRead: (n: DbNotification) => void; onMarkAllRead: () => void; onClose: () => void }) {
+  const unread = notifications.filter(x => !x.is_read);
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return <div className="fixed inset-0 z-40"><button onClick={onClose} className="absolute inset-0 bg-black/30" aria-label="Close notifications" /><aside className="absolute right-0 top-0 h-full w-full max-w-[420px] overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 pb-4"><div><p className="text-xs font-bold uppercase tracking-wide text-[#e87500]">Updates</p><h2 className="heading mt-1 text-xl font-bold">Notifications</h2></div><button onClick={onClose} className="rounded-lg p-2 hover:bg-slate-100"><X size={18} /></button></div><div className="mt-4 flex items-center justify-between"><p className="text-sm text-slate-500">{unread.length} unread</p><button onClick={onMarkAllRead} className="text-xs font-bold text-[#e87500]">Mark all read</button></div><div className="mt-4 space-y-3">{notifications.length ? notifications.map(x => <div key={x.id} className={`rounded-xl border p-4 ${x.is_read ? 'border-slate-100 bg-slate-50' : 'border-amber-100 bg-[#fffaf0]'}`}><div className="flex items-start justify-between gap-3"><div><p className="font-bold">{x.title}</p><p className="mt-1 text-sm text-slate-500">{x.message}</p><p className="mt-2 text-xs text-slate-400">{fmt(x.created_at)}</p></div>{!x.is_read && <button onClick={() => onMarkRead(x)} className="rounded-lg border bg-white p-2"><Check size={15} /></button>}</div></div>) : <Empty label="No notifications yet" />}</div><button onClick={onClose} className="mt-6 w-full rounded-xl border border-slate-200 py-3 text-sm font-bold">Close</button></aside></div>;
+}
 function ConfirmLogout({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 text-amber-700"><LogOut size={20} /></div><h2 className="heading mt-4 text-xl font-bold">Log out of the console?</h2><p className="mt-2 text-sm leading-6 text-slate-500">You will return to the sign-in screen. Your records stay saved in the database.</p><div className="mt-6 flex gap-3"><button onClick={onCancel} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold">Cancel</button><button onClick={onConfirm} className="flex-1 rounded-xl bg-[#050505] py-3 text-sm font-bold text-white">Log out</button></div></div></div> }
-function Notifications({ notices, update }: { notices: Notice[]; update: (x: Partial<{ notifications: Notice[] }>, m: string) => void }) { const mark = (notice: Notice) => update({ notifications: notices.map(x => x.id === notice.id ? { ...x, read: true } : x) }, 'Notification marked read'); return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Event center</p><h2 className="heading mt-1 text-3xl font-bold">Notifications & Alerts</h2></div><Panel title={`${notices.filter(x => !x.read).length} unread notifications`} action={<button onClick={() => update({ notifications: notices.map(x => ({ ...x, read: true })) }, 'All notifications marked read')} className="text-xs font-bold text-[#e87500]">Mark all as read</button>}>{notices.length ? <div className="space-y-3">{notices.map(x => <div key={x.id} className={`flex items-center justify-between gap-4 rounded-xl border p-4 ${x.read ? 'border-slate-100 bg-slate-50' : 'border-amber-100 bg-[#fffaf0]'}`}><div><p className="font-bold">{x.title}</p><p className="mt-1 text-sm text-slate-500">{x.text}</p><p className="mt-2 text-xs text-slate-400">{x.date}</p></div>{!x.read && <button onClick={() => mark(x)} className="rounded-lg border bg-white p-2"><Check size={16} /></button>}</div>)}</div> : <Empty label="No notifications yet" />}</Panel></div> }
+function Notifications({ notifications, onMarkRead, onMarkAllRead }: { notifications: DbNotification[]; onMarkRead: (n: DbNotification) => void; onMarkAllRead: () => void }) {
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Event center</p><h2 className="heading mt-1 text-3xl font-bold">Notifications & Alerts</h2></div><Panel title={`${notifications.filter(x => !x.is_read).length} unread notifications`} action={<button onClick={onMarkAllRead} className="text-xs font-bold text-[#e87500]">Mark all as read</button>}>{notifications.length ? <div className="space-y-3">{notifications.map(x => <div key={x.id} className={`flex items-center justify-between gap-4 rounded-xl border p-4 ${x.is_read ? 'border-slate-100 bg-slate-50' : 'border-amber-100 bg-[#fffaf0]'}`}><div><p className="font-bold">{x.title}</p><p className="mt-1 text-sm text-slate-500">{x.message}</p><p className="mt-2 text-xs text-slate-400">{fmt(x.created_at)}</p></div>{!x.is_read && <button onClick={() => onMarkRead(x)} className="rounded-lg border bg-white p-2"><Check size={16} /></button>}</div>)}</div> : <Empty label="No notifications yet. Notifications are generated when trips complete, invoices are created, and payments are recorded." />}</Panel></div>;
+}
 
 function SettingsPage() { const [active, setActive] = useState('Appearance'); const [message, setMessage] = useState(''); const [darkMode, setDarkMode] = useState(false); const [emailAlerts, setEmailAlerts] = useState(true); const sections = ['Appearance', 'Notifications', 'Security & Login', 'Business information', 'Invoice settings', 'Payment gateway']; const content = active === 'Appearance' ? <Panel title="Appearance preferences"><div className="flex items-center justify-between rounded-xl border border-slate-100 p-4"><div><p className="font-bold">Dark navigation</p><p className="mt-1 text-sm text-slate-500">Keep the Blackbuck sidebar in its dark brand style.</p></div><Toggle checked={darkMode} onChange={setDarkMode} /></div><div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">The console keeps a bright workspace for clear data entry and readable tables.</div></Panel> : active === 'Notifications' ? <Panel title="Notification preferences"><Preference label="Load and trip activity" description="Show operational updates inside the notification center." checked={emailAlerts} onChange={setEmailAlerts} /><Preference label="Payment reminders" description="Keep payment and invoice reminders enabled for testing." checked={emailAlerts} onChange={setEmailAlerts} /></Panel> : active === 'Security & Login' ? <Panel title="Security & Login"><div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4"><div className="flex gap-3"><ShieldCheck className="text-emerald-600" size={20} /><div><p className="font-bold text-emerald-800">Trial access is active</p><p className="mt-1 text-sm text-emerald-700">You are signed in with the trial administrator account.</p></div></div></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><Info label="Admin email" value={LOGIN_EMAIL} /><Info label="Current password" value="Configured trial password" /></div><button onClick={() => setMessage('For trial mode, use the fixed credentials shown on the login screen.')} className="mt-5 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold">Review login details</button></Panel> : active === 'Business information' ? <Panel title="Business information"><div className="grid gap-4 sm:grid-cols-2"><Field label="Business name" value="Blackbuck Transport" onChange={() => undefined} placeholder="Blackbuck Transport" /><Field label="City" value="Gadag" onChange={() => undefined} placeholder="Gadag" /><Field label="GSTIN" value="Not configured" onChange={() => undefined} placeholder="Add GSTIN later" required={false} /><Field label="Support phone" value="Not configured" onChange={() => undefined} placeholder="Add support number later" required={false} /></div><p className="mt-4 text-sm text-slate-500">These fields are display-only until your own backend is connected.</p></Panel> : active === 'Invoice settings' ? <Panel title="Invoice settings"><Preference label="Sri Sai Deluxe Transport format" description="Use the configured invoice layout for preview and future document generation." checked={true} onChange={() => undefined} /><Preference label="GST calculation" description="GST remains unconfigured in trial mode." checked={false} onChange={() => undefined} /></Panel> : <Panel title="Payment gateway"><div className="rounded-xl border border-amber-200 bg-amber-50 p-5"><div className="flex gap-3"><AlertCircle className="text-amber-600" size={20} /><div><p className="font-bold text-amber-800">Not connected</p><p className="mt-1 text-sm text-amber-700">No payment provider is called in this trial. Connect your own gateway later.</p></div></div></div><button onClick={() => setMessage('Gateway setup is intentionally disabled in trial mode.')} className="mt-5 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold">Check setup status</button></Panel>; return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Workspace controls</p><h2 className="heading mt-1 text-3xl font-bold">Settings & Profile</h2><p className="mt-1 text-sm text-slate-500">Choose a section to manage your admin workspace.</p></div><div className="grid gap-6 lg:grid-cols-[260px_1fr]"><div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">{sections.map(item => <button key={item} onClick={() => { setActive(item); setMessage(''); }} className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${active === item ? 'bg-[#fff0c2] text-black' : 'hover:bg-slate-50'}`}><Settings size={16} />{item}</button>)}</div><div>{content}{message && <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-700"><CheckCircle2 size={17} />{message}</div>}</div></div></div> }
 
@@ -390,21 +484,26 @@ function App() {
   const [trips, setTrips] = useState<SupabaseTrip[]>([]);
   const [invoices, setInvoices] = useState<SupabaseInvoice[]>([]);
   const [subs, setSubs] = useState<SupabaseSubscription[]>([]);
+  const [notifications, setNotifications] = useState<DbNotification[]>([]);
   const [liveError, setLiveError] = useState('');
   const [liveLoading, setLiveLoading] = useState(true);
-  const [notices, setNotices] = useState<Notice[]>(() => { try { return JSON.parse(localStorage.getItem(NOTICES_KEY) || '[]') as Notice[]; } catch { return []; } });
 
-  useEffect(() => { localStorage.setItem(NOTICES_KEY, JSON.stringify(notices)); }, [notices]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 3000); return () => clearTimeout(timer); }, [toast]);
+
+  const fetchNotifications = useCallback(async () => {
+    const { data, error } = await supabase.from('notifications').select('*').order('created_at', { ascending: false });
+    if (!error && data) setNotifications(data as DbNotification[]);
+  }, []);
 
   const refresh = useCallback(async () => {
     setLiveLoading(true);
-    const [loadResult, driverResult, tripResult, invoiceResult, subResult] = await Promise.all([
+    const [loadResult, driverResult, tripResult, invoiceResult, subResult, notifResult] = await Promise.all([
       supabase.from('loads').select('*').order('created_at', { ascending: false }),
       supabase.from('drivers').select('*').order('created_at', { ascending: false }),
       supabase.from('trips').select('*').order('created_at', { ascending: false }),
       supabase.from('invoices').select('*').order('created_at', { ascending: false }),
       supabase.from('subscriptions').select('*').order('created_at', { ascending: false }),
+      supabase.from('notifications').select('*').order('created_at', { ascending: false }),
     ]);
     if (loadResult.error || driverResult.error || tripResult.error || invoiceResult.error || subResult.error) {
       setLiveError('Live data could not be loaded from the database. Check your connection and try Refresh.');
@@ -416,6 +515,7 @@ function App() {
       setSubs((subResult.data ?? []) as SupabaseSubscription[]);
       setLiveError('');
     }
+    if (!notifResult.error && notifResult.data) setNotifications(notifResult.data as DbNotification[]);
     setLiveLoading(false);
   }, []);
 
@@ -425,22 +525,32 @@ function App() {
   const title = page === 'profile' ? 'Profile' : nav.find(item => item.id === page)?.label || 'Dashboard';
   const liveData = { drivers, trips, invoices, subs };
   const showToast = (message: string) => setToast(message);
-  const updateNotices = (next: Partial<{ notifications: Notice[] }>, message: string) => { setNotices(current => ({ notifications: current, ...next }).notifications as Notice[]); setToast(message); };
-  const update = (next: Partial<{ notifications: Notice[] }>, message: string) => { updateNotices(next, message); void refresh(); };
+  const markNotificationRead = async (n: DbNotification) => {
+    await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
+    setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_read: true } : x));
+  };
+  const markAllNotificationsRead = async () => {
+    const unread = notifications.filter(x => !x.is_read);
+    if (!unread.length) return;
+    await Promise.all(unread.map(x => supabase.from('notifications').update({ is_read: true }).eq('id', x.id)));
+    setNotifications(prev => prev.map(x => ({ ...x, is_read: true })));
+    showToast('All notifications marked read');
+  };
+  const update = (next: Record<string, unknown>, message: string) => { showToast(message); void refresh(); };
   const logout = () => { localStorage.removeItem(SESSION_KEY); setLoggedIn(false); setConfirmLogout(false); };
   const askLogout = () => setConfirmLogout(true);
   const content = page === 'dashboard' ? <Dashboard data={liveData} loads={loads} adminName={adminName} loading={liveLoading} error={liveError} onNavigate={setPage} />
     : page === 'profile' ? <ProfilePage adminName={adminName} onNameChange={setAdminName} />
     : page === 'loads' ? <Loads update={update} />
     : page === 'drivers' ? <Drivers onUpdate={showToast} onDriverChange={setDrivers} />
-    : page === 'trips' ? <Trips drivers={drivers} onUpdate={(m) => { showToast(m); void refresh(); }} />
-    : page === 'invoices' ? <Invoices onUpdate={(m) => { showToast(m); void refresh(); }} />
+    : page === 'trips' ? <Trips drivers={drivers} onUpdate={(m) => { showToast(m); void refresh(); void fetchNotifications(); }} />
+    : page === 'invoices' ? <Invoices onUpdate={(m) => { showToast(m); void refresh(); void fetchNotifications(); }} />
     : page === 'subscriptions' ? <Subscriptions drivers={drivers} onUpdate={showToast} refresh={() => void refresh()} />
     : page === 'payments' ? <Payments invoices={invoices} />
-    : page === 'reports' ? <Reports data={liveData} loads={loads} onUpdate={showToast} />
-    : page === 'notifications' ? <Notifications notices={notices} update={updateNotices} />
+    : page === 'reports' ? <Reports data={liveData} loads={loads} onRefresh={() => void refresh()} onUpdate={showToast} />
+    : page === 'notifications' ? <Notifications notifications={notifications} onMarkRead={markNotificationRead} onMarkAllRead={markAllNotificationsRead} />
     : <SettingsPage />;
-  return <div className="min-h-screen bg-[#f5f6f8]"><aside className={`fixed inset-y-0 left-0 z-30 flex w-[248px] flex-col bg-[#080808] text-white transition-transform lg:translate-x-0 ${mobile ? 'translate-x-0' : '-translate-x-full'}`}><div className="flex h-[82px] items-center border-b border-white/10 px-6"><Logo /></div><nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">{nav.map(item => { const Icon = item.icon; return <button key={item.id} onClick={() => { setPage(item.id); setMobile(false); }} className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold ${page === item.id ? 'bg-[#ffb000] text-black' : 'text-white/65 hover:bg-white/10 hover:text-white'}`}><Icon size={18} />{item.label}</button> })}</nav><button onClick={askLogout} className="m-3 flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold text-white/65 hover:bg-white/10 hover:text-white"><LogOut size={18} />Log out</button></aside>{mobile && <button onClick={() => setMobile(false)} className="fixed inset-0 z-20 bg-black/40 lg:hidden" aria-label="Close navigation" />}<main className="min-h-screen lg:pl-[248px]"><header className="sticky top-0 z-10 flex h-[82px] items-center justify-between border-b border-slate-200 bg-white/90 px-5 backdrop-blur md:px-8"><div className="flex items-center gap-3"><button onClick={() => setMobile(true)} className="rounded-lg p-2 hover:bg-slate-100 lg:hidden"><Menu size={21} /></button><div><h1 className="heading text-xl font-bold">{title}</h1><p className="hidden text-xs text-slate-500 sm:block">Blackbuck Transport / {title}</p></div></div><div className="flex items-center gap-3"><button onClick={() => setNotificationsOpen(true)} className="relative rounded-xl p-2.5 hover:bg-slate-100"><Bell size={19} />{notices.some(x => !x.read) && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />}</button><button onClick={() => setPage('profile')} className="hidden items-center gap-2 border-l border-slate-200 pl-3 text-left sm:flex"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-black font-bold text-[#ffb000]">{adminName.charAt(0).toUpperCase()}</div><div><p className="text-xs font-bold">{adminName}</p><p className="text-[11px] text-slate-500">Profile & credentials</p></div><ChevronDown size={14} /></button></div></header><div className="mx-auto max-w-[1500px] p-5 md:p-8">{content}</div></main>{notificationsOpen && <NotificationDrawer notices={notices} update={updateNotices} onClose={() => setNotificationsOpen(false)} />}{confirmLogout && <ConfirmLogout onCancel={() => setConfirmLogout(false)} onConfirm={logout} />}{toast && <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white shadow-xl"><CheckCircle2 size={18} className="text-[#ffb000]" />{toast}<button onClick={() => setToast('')}><X size={16} /></button></div>}</div>;
+  return <div className="min-h-screen bg-[#f5f6f8]"><aside className={`fixed inset-y-0 left-0 z-30 flex w-[248px] flex-col bg-[#080808] text-white transition-transform lg:translate-x-0 ${mobile ? 'translate-x-0' : '-translate-x-full'}`}><div className="flex h-[82px] items-center border-b border-white/10 px-6"><Logo /></div><nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">{nav.map(item => { const Icon = item.icon; return <button key={item.id} onClick={() => { setPage(item.id); setMobile(false); }} className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold ${page === item.id ? 'bg-[#ffb000] text-black' : 'text-white/65 hover:bg-white/10 hover:text-white'}`}><Icon size={18} />{item.label}</button> })}</nav><button onClick={askLogout} className="m-3 flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold text-white/65 hover:bg-white/10 hover:text-white"><LogOut size={18} />Log out</button></aside>{mobile && <button onClick={() => setMobile(false)} className="fixed inset-0 z-20 bg-black/40 lg:hidden" aria-label="Close navigation" />}<main className="min-h-screen lg:pl-[248px]"><header className="sticky top-0 z-10 flex h-[82px] items-center justify-between border-b border-slate-200 bg-white/90 px-5 backdrop-blur md:px-8"><div className="flex items-center gap-3"><button onClick={() => setMobile(true)} className="rounded-lg p-2 hover:bg-slate-100 lg:hidden"><Menu size={21} /></button><div><h1 className="heading text-xl font-bold">{title}</h1><p className="hidden text-xs text-slate-500 sm:block">Blackbuck Transport / {title}</p></div></div><div className="flex items-center gap-3"><button onClick={() => setNotificationsOpen(true)} className="relative rounded-xl p-2.5 hover:bg-slate-100"><Bell size={19} />{notifications.some(x => !x.is_read) && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />}</button><button onClick={() => setPage('profile')} className="hidden items-center gap-2 border-l border-slate-200 pl-3 text-left sm:flex"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-black font-bold text-[#ffb000]">{adminName.charAt(0).toUpperCase()}</div><div><p className="text-xs font-bold">{adminName}</p><p className="text-[11px] text-slate-500">Profile & credentials</p></div><ChevronDown size={14} /></button></div></header><div className="mx-auto max-w-[1500px] p-5 md:p-8">{content}</div></main>{notificationsOpen && <NotificationDrawer notifications={notifications} onMarkRead={markNotificationRead} onMarkAllRead={markAllNotificationsRead} onClose={() => setNotificationsOpen(false)} />}{confirmLogout && <ConfirmLogout onCancel={() => setConfirmLogout(false)} onConfirm={logout} />}{toast && <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white shadow-xl"><CheckCircle2 size={18} className="text-[#ffb000]" />{toast}<button onClick={() => setToast('')}><X size={16} /></button></div>}</div>;
 }
 
 export default App;
