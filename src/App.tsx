@@ -175,13 +175,26 @@ function Subscriptions({ drivers, onUpdate, refresh }: { drivers: SupabaseDriver
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ driver_id: '', plan_name: 'Monthly Membership', price: '1000', ends_at: '' });
   const [confirmId, setConfirmId] = useState('');
 
   const fetchSubs = async () => {
+    setLoading(true);
     const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false });
-    if (error) { onUpdate('Subscription data could not be loaded.'); return; }
-    setSubs((data ?? []) as SupabaseSubscription[]);
+    setLoading(false);
+    if (error) { setPageError('Subscription data could not be loaded. Tap Refresh to try again.'); return; }
+    const list = (data ?? []) as SupabaseSubscription[];
+
+    const now = new Date();
+    const toExpire = list.filter(x => x.status === 'Active' && new Date(x.ends_at) < now);
+    if (toExpire.length) {
+      await Promise.all(toExpire.map(x => supabase.from('subscriptions').update({ status: 'Expired' }).eq('id', x.id)));
+      toExpire.forEach(x => { x.status = 'Expired'; });
+    }
+    setSubs(list);
+    setPageError('');
   };
 
   useEffect(() => { void fetchSubs(); }, []);
@@ -198,18 +211,24 @@ function Subscriptions({ drivers, onUpdate, refresh }: { drivers: SupabaseDriver
     e.preventDefault();
     setFormError('');
     if (!form.driver_id) { setFormError('Select the driver who is subscribing.'); return; }
+    if (!form.plan_name.trim()) { setFormError('Enter a plan name.'); return; }
+    const priceNum = Number(form.price);
+    if (!Number.isFinite(priceNum) || priceNum <= 0) { setFormError('Enter a valid price greater than zero.'); return; }
     if (!form.ends_at) { setFormError('Choose the membership end date.'); return; }
+    const end = new Date(`${form.ends_at}T23:59:59`);
+    if (end < new Date()) { setFormError('The end date cannot be in the past.'); return; }
+
     setSaving(true);
     const { error } = await supabase.from('subscriptions').insert({
       driver_id: form.driver_id,
-      plan_name: form.plan_name,
-      price: Number(form.price),
+      plan_name: form.plan_name.trim(),
+      price: priceNum,
       starts_at: new Date().toISOString(),
-      ends_at: new Date(`${form.ends_at}T23:59:59`).toISOString(),
+      ends_at: end.toISOString(),
       status: 'Pending',
     });
     setSaving(false);
-    if (error) { setFormError(error.message || 'Could not create the subscription.'); return; }
+    if (error) { setFormError(error.message || 'Could not create the subscription. Check your connection and try again.'); return; }
     onUpdate('Subscription created');
     setForm({ driver_id: '', plan_name: 'Monthly Membership', price: '1000', ends_at: '' });
     setOpen(false);
@@ -219,7 +238,7 @@ function Subscriptions({ drivers, onUpdate, refresh }: { drivers: SupabaseDriver
 
   const setStatus = async (sub: SupabaseSubscription, status: string) => {
     const { error } = await supabase.from('subscriptions').update({ status }).eq('id', sub.id);
-    if (error) { onUpdate('Could not update the subscription.'); return; }
+    if (error) { setPageError('Could not update the subscription.'); return; }
     onUpdate(`Subscription marked ${status.toLowerCase()}`);
     void fetchSubs();
     refresh();
@@ -228,18 +247,127 @@ function Subscriptions({ drivers, onUpdate, refresh }: { drivers: SupabaseDriver
   const remove = async (sub: SupabaseSubscription) => {
     const { error } = await supabase.from('subscriptions').delete().eq('id', sub.id);
     setConfirmId('');
-    if (error) { onUpdate('Could not remove the subscription.'); return; }
+    if (error) { setPageError('Could not remove the subscription.'); return; }
     onUpdate('Subscription removed');
     void fetchSubs();
     refresh();
   };
 
-  const total = subs.reduce((sum, x) => sum + Number(x.price), 0);
+  const activeSubs = subs.filter(x => x.status === 'Active');
+  const total = activeSubs.reduce((sum, x) => sum + Number(x.price), 0);
 
-  return <div className="space-y-6"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold text-[#e87500]">Membership revenue</p><h2 className="heading mt-1 text-3xl font-bold">Subscription Management</h2></div><button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-xl bg-[#ffb000] px-4 py-3 text-sm font-bold"><Plus size={17} />New subscription</button></div><div className="grid gap-4 sm:grid-cols-3"><Metric icon={CreditCard} label="Total subscriptions" value={subs.length} /><Metric icon={CalendarDays} label="Active plans" value={subs.filter(x => x.status === 'Active').length} accent="green" /><Metric icon={CircleDollarSign} label="Plan value" value={money(total)} accent="blue" /></div><Panel title="Subscription records" action={<button onClick={() => void fetchSubs()} className="text-xs font-bold text-[#e87500]">Refresh</button>}>{formError && !open && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>}{subs.length ? <Table><tr><th className="px-4 py-3">Driver</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Price</th><th className="px-4 py-3">Starts</th><th className="px-4 py-3">Ends</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actions</th></tr>{subs.map(x => <tr key={x.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold">{driverName(x.driver_id)}</td><td className="px-4 py-3">{driverPhone(x.driver_id)}</td><td className="px-4 py-3">{x.plan_name}</td><td className="px-4 py-3">{money(Number(x.price))}</td><td className="px-4 py-3">{fmt(x.starts_at)}</td><td className="px-4 py-3">{fmt(x.ends_at)}</td><td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${badge(x.status)}`}>{x.status}</span></td><td className="flex flex-wrap gap-2 px-4 py-3">{x.status === 'Pending' && <button onClick={() => void setStatus(x, 'Active')} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white">Activate</button>}{x.status === 'Active' && <button onClick={() => void setStatus(x, 'Expired')} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Mark expired</button>}{confirmId === x.id ? <button onClick={() => void remove(x)} className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white">Confirm remove</button> : <button onClick={() => setConfirmId(x.id)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Remove</button>}</td></tr>)}</Table> : <Empty label="No subscriptions yet. Create one for a driver to begin." />}</Panel>{open && <Modal title="New subscription" onClose={() => setOpen(false)}><form onSubmit={submit} className="space-y-4"><Select label="Driver" value={form.driver_id} onChange={v => setForm({ ...form, driver_id: v })}><option value="">Select a driver</option>{drivers.map(x => <option key={x.id} value={x.id}>{x.full_name} ({x.phone})</option>)}</Select><Field label="Plan name" value={form.plan_name} onChange={v => setForm({ ...form, plan_name: v })} placeholder="Monthly Membership" /><Field label="Price (₹)" value={form.price} onChange={v => setForm({ ...form, price: v })} placeholder="1000" type="number" /><Field label="Membership ends on" value={form.ends_at} onChange={v => setForm({ ...form, ends_at: v })} placeholder={today()} type="date" />{formError && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</div>}<button disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ffb000] py-3 font-bold disabled:opacity-60">{saving ? 'Saving...' : 'Create subscription'}</button></form></Modal>}{confirmId && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"><h2 className="heading text-xl font-bold">Remove this subscription?</h2><p className="mt-2 text-sm leading-6 text-slate-500">The subscription record will be deleted from the database. This cannot be undone.</p><div className="mt-6 flex gap-3"><button onClick={() => setConfirmId('')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold">Cancel</button><button onClick={() => { const sub = subs.find(x => x.id === confirmId); if (sub) void remove(sub); }} className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-bold text-white">Remove</button></div></div></div>}</div>
+  return <div className="space-y-6">
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div><p className="text-sm font-semibold text-[#e87500]">Membership revenue</p><h2 className="heading mt-1 text-3xl font-bold">Subscription Management</h2></div>
+      <button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-xl bg-[#ffb000] px-4 py-3 text-sm font-bold"><Plus size={17} />New subscription</button>
+    </div>
+    <div className="grid gap-4 sm:grid-cols-3">
+      <Metric icon={CreditCard} label="Total subscriptions" value={loading ? '…' : subs.length} />
+      <Metric icon={CalendarDays} label="Active plans" value={loading ? '…' : activeSubs.length} accent="green" />
+      <Metric icon={CircleDollarSign} label="Active plan value" value={loading ? '…' : money(total)} accent="blue" />
+    </div>
+    <Panel title="Subscription records" action={<button onClick={() => void fetchSubs()} className="text-xs font-bold text-[#e87500]">Refresh</button>}>
+      {pageError && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{pageError}</div>}
+      {loading ? <Empty label="Loading subscriptions..." /> : subs.length ? <Table>
+        <tr><th className="px-4 py-3">Driver</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Price</th><th className="px-4 py-3">Starts</th><th className="px-4 py-3">Ends</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actions</th></tr>
+        {subs.map(x => <tr key={x.id} className="border-t border-slate-100">
+          <td className="px-4 py-3 font-bold">{driverName(x.driver_id)}</td>
+          <td className="px-4 py-3">{driverPhone(x.driver_id)}</td>
+          <td className="px-4 py-3">{x.plan_name}</td>
+          <td className="px-4 py-3">{money(Number(x.price))}</td>
+          <td className="px-4 py-3">{fmt(x.starts_at)}</td>
+          <td className="px-4 py-3">{fmt(x.ends_at)}</td>
+          <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${badge(x.status)}`}>{x.status}</span></td>
+          <td className="flex flex-wrap gap-2 px-4 py-3">
+            {x.status === 'Pending' && <button onClick={() => void setStatus(x, 'Active')} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white">Activate</button>}
+            {x.status === 'Active' && <button onClick={() => void setStatus(x, 'Expired')} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Mark expired</button>}
+            {confirmId === x.id
+              ? <button onClick={() => void remove(x)} className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white">Confirm remove</button>
+              : <button onClick={() => setConfirmId(x.id)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Remove</button>}
+          </td>
+        </tr>)}
+      </Table> : <Empty label="No subscriptions yet. Create one for a driver to begin." />}
+    </Panel>
+    {open && <Modal title="New subscription" onClose={() => setOpen(false)}>
+      <form onSubmit={submit} className="space-y-4">
+        <Select label="Driver" value={form.driver_id} onChange={v => setForm({ ...form, driver_id: v })}>
+          <option value="">Select a driver</option>
+          {drivers.map(x => <option key={x.id} value={x.id}>{x.full_name} ({x.phone})</option>)}
+        </Select>
+        <Field label="Plan name" value={form.plan_name} onChange={v => setForm({ ...form, plan_name: v })} placeholder="Monthly Membership" />
+        <Field label="Price (₹)" value={form.price} onChange={v => setForm({ ...form, price: v })} placeholder="1000" type="number" />
+        <Field label="Membership ends on" value={form.ends_at} onChange={v => setForm({ ...form, ends_at: v })} placeholder={today()} type="date" />
+        {formError && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</div>}
+        <button disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ffb000] py-3 font-bold disabled:opacity-60">{saving ? 'Saving...' : 'Create subscription'}</button>
+      </form>
+    </Modal>}
+    {confirmId && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"><h2 className="heading text-xl font-bold">Remove this subscription?</h2><p className="mt-2 text-sm leading-6 text-slate-500">The subscription record will be deleted from the database. This cannot be undone.</p><div className="mt-6 flex gap-3"><button onClick={() => setConfirmId('')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold">Cancel</button><button onClick={() => { const sub = subs.find(x => x.id === confirmId); if (sub) void remove(sub); }} className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-bold text-white">Remove</button></div></div></div>}
+  </div>
 }
 
-function Payments({ invoices }: { invoices: SupabaseInvoice[] }) { const total = invoices.reduce((sum, x) => sum + x.paid_amount, 0); const due = invoices.reduce((sum, x) => sum + x.total_amount - x.paid_amount, 0); return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Collections overview</p><h2 className="heading mt-1 text-3xl font-bold">Payments & Reconciliation</h2></div><div className="grid gap-4 sm:grid-cols-3"><Metric icon={CircleDollarSign} label="Collected" value={money(total)} accent="green" /><Metric icon={AlertCircle} label="Outstanding" value={money(due)} accent="blue" /><Metric icon={Wallet} label="Invoices" value={invoices.length} /></div><Panel title="Recorded payments">{invoices.length ? <Table><tr><th className="px-4 py-3">Invoice no.</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Total</th><th className="px-4 py-3">Paid</th><th className="px-4 py-3">Status</th></tr>{invoices.map(x => <tr key={x.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold">{x.invoice_number}</td><td className="px-4 py-3">{x.invoice_date}</td><td className="px-4 py-3">{money(x.total_amount)}</td><td className="px-4 py-3">{money(x.paid_amount)}</td><td className="px-4 py-3"><Badge>{x.status}</Badge></td></tr>)}</Table> : <Empty label="No invoices yet. Complete a trip to generate one." />}</Panel></div> }
+type DbPayment = { id: string; invoice_id: string | null; amount: number; payment_type: string; payment_method: string; status: string; reference: string | null; paid_at: string | null; created_at: string };
+
+function Payments({ invoices }: { invoices: SupabaseInvoice[] }) {
+  const [payments, setPayments] = useState<DbPayment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const fetchPayments = async () => {
+    setLoading(true);
+    const { data, error: fetchError } = await supabase.from('payments').select('*').order('created_at', { ascending: false });
+    setLoading(false);
+    if (fetchError) { setError('Payment records could not be loaded. Tap Refresh to try again.'); return; }
+    setPayments((data ?? []) as DbPayment[]);
+    setError('');
+  };
+
+  useEffect(() => { void fetchPayments(); }, []);
+
+  const total = invoices.reduce((sum, x) => sum + x.paid_amount, 0);
+  const due = invoices.reduce((sum, x) => sum + x.total_amount - x.paid_amount, 0);
+  const verifiedPayments = payments.filter(x => x.status === 'verified');
+  const collected = verifiedPayments.reduce((sum, x) => sum + Number(x.amount), 0);
+  const invoiceNumber = (invId: string | null) => invoices.find(x => x.id === invId)?.invoice_number ?? '—';
+  const methodLabel = (method: string) => method === 'upi' ? 'UPI' : method === 'qr_code' ? 'QR code' : method === 'net_banking' ? 'Net banking' : method === 'card' ? 'Card' : 'Cash';
+  const fmtDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const payBadge = (status: string) => status === 'verified' ? 'bg-emerald-100 text-emerald-700' : status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700';
+
+  return <div className="space-y-6">
+    <div><p className="text-sm font-semibold text-[#e87500]">Collections overview</p><h2 className="heading mt-1 text-3xl font-bold">Payments & Reconciliation</h2></div>
+    <div className="grid gap-4 sm:grid-cols-3">
+      <Metric icon={CircleDollarSign} label="Collected (verified)" value={loading ? '…' : money(collected)} accent="green" />
+      <Metric icon={AlertCircle} label="Outstanding" value={money(due)} accent="blue" />
+      <Metric icon={Wallet} label="Payment records" value={loading ? '…' : payments.length} />
+    </div>
+    <Panel title="Recorded payments" action={<button onClick={() => void fetchPayments()} className="text-xs font-bold text-[#e87500]">Refresh</button>}>
+      {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {loading ? <Empty label="Loading payments..." /> : payments.length ? <Table>
+        <tr><th className="px-4 py-3">Invoice</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Method</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Status</th></tr>
+        {payments.map(x => <tr key={x.id} className="border-t border-slate-100">
+          <td className="px-4 py-3 font-bold">{invoiceNumber(x.invoice_id)}</td>
+          <td className="px-4 py-3">{money(Number(x.amount))}</td>
+          <td className="px-4 py-3">{methodLabel(x.payment_method)}</td>
+          <td className="px-4 py-3 capitalize">{x.payment_type.replace('_', ' ')}</td>
+          <td className="px-4 py-3">{x.reference ?? '—'}</td>
+          <td className="px-4 py-3">{fmtDate(x.paid_at)}</td>
+          <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${payBadge(x.status)}`}>{x.status}</span></td>
+        </tr>)}
+      </Table> : <Empty label="No payment records yet. Record a payment from the Invoices page." />}
+    </Panel>
+    <Panel title="Invoice balances">
+      {invoices.length ? <Table>
+        <tr><th className="px-4 py-3">Invoice no.</th><th className="px-4 py-3">Total</th><th className="px-4 py-3">Paid</th><th className="px-4 py-3">Balance</th><th className="px-4 py-3">Status</th></tr>
+        {invoices.map(x => <tr key={x.id} className="border-t border-slate-100">
+          <td className="px-4 py-3 font-bold">{x.invoice_number}</td>
+          <td className="px-4 py-3">{money(Number(x.total_amount))}</td>
+          <td className="px-4 py-3">{money(Number(x.paid_amount))}</td>
+          <td className="px-4 py-3 font-bold text-[#e87500]">{money(Number(x.total_amount) - Number(x.paid_amount))}</td>
+          <td className="px-4 py-3"><Badge>{x.status}</Badge></td>
+        </tr>)}
+      </Table> : <Empty label="No invoices yet. Complete a trip to generate one." />}
+    </Panel>
+  </div>
+}
 
 function Reports({ data, loads, onUpdate }: { data: LiveDrivers; loads: LiveLoad[]; onUpdate: (m: string) => void }) { const values = [loads.length, data.trips.filter(x => x.status === 'completed').length, data.invoices.reduce((s, x) => s + x.total_amount, 0)]; return <div className="space-y-6"><div className="flex items-end justify-between"><div><p className="text-sm font-semibold text-[#e87500]">Live database records</p><h2 className="heading mt-1 text-3xl font-bold">Reports & Analytics</h2></div><button onClick={() => { const csv = `Metric,Value\nTotal loads,${values[0]}\nCompleted trips,${values[1]}\nInvoice value,${values[2]}`; const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); const link = document.createElement('a'); link.href = url; link.download = 'blackbuck-report.csv'; link.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold"><Download size={16} />Export CSV</button></div><div className="grid gap-4 md:grid-cols-3"><Metric icon={Package} label="Total loads" value={values[0]} /><Metric icon={Route} label="Completed trips" value={values[1]} /><Metric icon={CircleDollarSign} label="Invoice value" value={money(values[2])} /></div><Panel title="Records overview"><div className="grid gap-4 sm:grid-cols-2"><div className="rounded-xl bg-slate-50 p-5"><p className="text-sm text-slate-500">Drivers with access</p><p className="heading mt-2 text-3xl font-bold">{data.drivers.filter(x => x.account_status === 'active').length}</p></div><div className="rounded-xl bg-slate-50 p-5"><p className="text-sm text-slate-500">Available loads</p><p className="heading mt-2 text-3xl font-bold">{loads.filter(x => (x.status ?? 'Available') === 'Available').length}</p></div></div></Panel><button onClick={() => onUpdate('Report figures refreshed from the database')} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold">Refresh figures</button></div> }
 

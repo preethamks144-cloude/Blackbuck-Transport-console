@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { CheckCircle2, Eye, Plus, Search, Send, X } from 'lucide-react';
+import { CheckCircle2, Eye, Plus, Search, Send, Trash2, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { Panel, Empty, Table, Modal, Field, today, money } from '@/components/ui';
 
 export type LiveLoad = {
   id: string;
@@ -26,12 +27,6 @@ export type LiveLoad = {
   created_at: string;
 };
 
-type Notice = { id: string; title: string; text: string; read: boolean; date: string };
-
-const id = () => crypto.randomUUID();
-const today = () => new Date().toISOString().slice(0, 10);
-const money = (value: number) => `₹${value.toLocaleString('en-IN')}`;
-
 const emptyForm = {
   from_city: '', from_state: '', to_city: '', to_state: '',
   goods: '', description: '', weight: '', bales_or_units: '',
@@ -39,59 +34,43 @@ const emptyForm = {
   pickup_date: today(), delivery_date: today(), price: '',
 };
 
-function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function badgeClass(status: string | null) {
+  const s = (status ?? 'Available').toLowerCase();
+  if (s === 'confirmed') return 'bg-emerald-100 text-emerald-700';
+  if (s === 'archived') return 'bg-slate-100 text-slate-600';
+  if (s === 'cancelled') return 'bg-red-100 text-red-700';
+  return 'bg-amber-100 text-amber-700';
+}
+
+function LoadDetails({ load, onClose }: { load: LiveLoad; onClose: () => void }) {
+  const rows: [string, string][] = [
+    ['From', `${load.from_city}${load.from_state ? `, ${load.from_state}` : ''}`],
+    ['To', `${load.to_city}${load.to_state ? `, ${load.to_state}` : ''}`],
+    ['Goods', load.goods],
+    ['Weight', load.weight],
+    ['Bales / units', load.bales_or_units ?? '—'],
+    ['Vehicle type', load.vehicle_type],
+    ['Distance', load.distance],
+    ['Price', money(Number(load.price))],
+    ['Pickup date', load.pickup_date],
+    ['Delivery date', load.delivery_date],
+    ['Posted by', load.posted_by ?? '—'],
+    ['Posted on', load.posted_on],
+    ['Status', load.status ?? 'Available'],
+    ['Description', load.description ?? '—'],
+  ];
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-        <h2 className="heading text-sm font-bold">{title}</h2>
-        {action}
+    <Modal title={`Load: ${load.from_city} → ${load.to_city}`} onClose={onClose}>
+      <div className="overflow-hidden rounded-xl border border-slate-200">
+        {rows.map(([label, value], i) => (
+          <div key={label} className={`flex justify-between px-4 py-3 text-sm ${i % 2 ? 'bg-slate-50' : ''}`}>
+            <span className="text-slate-500">{label}</span>
+            <span className="max-w-[60%] text-right font-semibold">{value}</span>
+          </div>
+        ))}
       </div>
-      <div className="p-5">{children}</div>
-    </section>
-  );
-}
-
-function Empty({ label }: { label: string }) {
-  return (
-    <div className="rounded-xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-500">
-      <p className="text-slate-400">{label}</p>
-    </div>
-  );
-}
-
-function Table({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200">
-      <table className="w-full min-w-[680px] text-left text-sm">
-        <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">{children}</thead>
-      </table>
-    </div>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="heading text-xl font-bold">{title}</h2>
-          <button onClick={onClose} className="rounded-lg p-2 hover:bg-slate-100"><X size={18} /></button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, placeholder, type = 'text', required = true }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string; required?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
-      <input required={required} type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm outline-none focus:border-[#ffb000] focus:bg-white" />
-    </label>
+      <button onClick={onClose} className="mt-5 w-full rounded-xl border border-slate-200 py-3 text-sm font-bold">Close</button>
+    </Modal>
   );
 }
 
@@ -102,11 +81,16 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
   const [formError, setFormError] = useState('');
   const [loads, setLoads] = useState<LiveLoad[]>([]);
   const [loadsError, setLoadsError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ ...emptyForm });
+  const [viewLoad, setViewLoad] = useState<LiveLoad | null>(null);
+  const [deleteId, setDeleteId] = useState('');
 
   const fetchLoads = async () => {
+    setLoading(true);
     const { data, error } = await supabase.from('loads').select('*').order('created_at', { ascending: false });
-    if (error) { setLoadsError('Live load data could not be loaded.'); return; }
+    setLoading(false);
+    if (error) { setLoadsError('Live load data could not be loaded. Tap Refresh to try again.'); return; }
     setLoads((data ?? []) as LiveLoad[]);
     setLoadsError('');
   };
@@ -120,27 +104,39 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setFormError('');
+
+    if (!form.from_city.trim()) { setFormError('Enter the origin city.'); return; }
+    if (!form.to_city.trim()) { setFormError('Enter the destination city.'); return; }
+    if (!form.goods.trim()) { setFormError('Enter the goods type.'); return; }
+    if (!form.weight.trim()) { setFormError('Enter the weight.'); return; }
+    if (!form.distance.trim()) { setFormError('Enter the distance.'); return; }
+    const priceNum = Number(form.price);
+    if (!Number.isFinite(priceNum) || priceNum <= 0) { setFormError('Enter a valid price greater than zero.'); return; }
+    if (form.pickup_date && form.delivery_date && form.pickup_date > form.delivery_date) {
+      setFormError('Pickup date cannot be after the delivery date.'); return;
+    }
+
     setSaving(true);
     const payload = {
-      from_city: form.from_city,
-      from_state: form.from_state || null,
-      to_city: form.to_city,
-      to_state: form.to_state || null,
-      goods: form.goods,
-      description: form.description || null,
-      weight: form.weight,
-      bales_or_units: form.bales_or_units || null,
-      vehicle_type: form.vehicle_type,
+      from_city: form.from_city.trim(),
+      from_state: form.from_state.trim() || null,
+      to_city: form.to_city.trim(),
+      to_state: form.to_state.trim() || null,
+      goods: form.goods.trim(),
+      description: form.description.trim() || null,
+      weight: form.weight.trim(),
+      bales_or_units: form.bales_or_units.trim() || null,
+      vehicle_type: form.vehicle_type.trim(),
       posted_on: today(),
-      distance: form.distance,
+      distance: form.distance.trim(),
       pickup_date: form.pickup_date,
       delivery_date: form.delivery_date,
-      price: Number(form.price),
+      price: priceNum,
     };
     const { error } = await supabase.from('loads').insert(payload);
     setSaving(false);
-    if (error) { setFormError(error.message || 'Could not save the load.'); return; }
-    update({}, 'Load posted to Supabase');
+    if (error) { setFormError(error.message || 'Could not save the load. Check your connection and try again.'); return; }
+    update({}, 'Load posted successfully');
     setForm({ ...emptyForm });
     setOpen(false);
     void fetchLoads();
@@ -148,17 +144,25 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
 
   const archive = async (loadId: string) => {
     const { error } = await supabase.from('loads').update({ status: 'Archived', is_new: false }).eq('id', loadId);
-    if (error) { setLoadsError('Could not archive the load.'); return; }
+    if (error) { setLoadsError('Could not archive the load. Tap Refresh and try again.'); return; }
     update({}, 'Load archived');
     void fetchLoads();
   };
 
-  const toneFor = (status: string | null) =>
-    status === 'Available' ? 'yellow' : status === 'Confirmed' ? 'green' : 'neutral';
+  const unarchive = async (loadId: string) => {
+    const { error } = await supabase.from('loads').update({ status: 'Available' }).eq('id', loadId);
+    if (error) { setLoadsError('Could not restore the load.'); return; }
+    update({}, 'Load restored to available');
+    void fetchLoads();
+  };
 
-  const badgeClass = (tone: string) =>
-    tone === 'green' ? 'bg-emerald-100 text-emerald-700' :
-    tone === 'yellow' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600';
+  const remove = async (loadId: string) => {
+    const { error } = await supabase.from('loads').delete().eq('id', loadId);
+    setDeleteId('');
+    if (error) { setLoadsError('Could not delete the load. It may be linked to a trip.'); return; }
+    update({}, 'Load deleted');
+    void fetchLoads();
+  };
 
   return (
     <div className="space-y-6">
@@ -186,7 +190,7 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
               className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-[#ffb000]" />
           </div>
         </div>
-        {visible.length ? (
+        {loading ? <Empty label="Loading loads..." /> : visible.length ? (
           <Table>
             <tr>
               <th className="px-4 py-3">From → To</th>
@@ -196,7 +200,7 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
               <th className="px-4 py-3">Distance</th>
               <th className="px-4 py-3">Price</th>
               <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Action</th>
+              <th className="px-4 py-3">Actions</th>
             </tr>
             {visible.map(x => (
               <tr key={x.id} className="border-t border-slate-100">
@@ -206,10 +210,14 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
                 <td className="px-4 py-3">{x.vehicle_type}</td>
                 <td className="px-4 py-3">{x.distance}</td>
                 <td className="px-4 py-3 font-bold">{money(Number(x.price))}</td>
-                <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${badgeClass(toneFor(x.status))}`}>{x.status ?? 'Available'}</span></td>
-                <td className="flex gap-2 px-4 py-3">
-                  <button className="rounded-lg border p-2"><Eye size={15} /></button>
+                <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${badgeClass(x.status)}`}>{x.status ?? 'Available'}</span></td>
+                <td className="flex flex-wrap gap-2 px-4 py-3">
+                  <button onClick={() => setViewLoad(x)} className="rounded-lg border p-2" title="View details"><Eye size={15} /></button>
                   {x.status !== 'Archived' && <button onClick={() => void archive(x.id)} className="rounded-lg border px-2 text-xs font-bold">Archive</button>}
+                  {x.status === 'Archived' && <button onClick={() => void unarchive(x.id)} className="rounded-lg border px-2 text-xs font-bold">Restore</button>}
+                  {deleteId === x.id
+                    ? <button onClick={() => void remove(x.id)} className="flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1.5 text-xs font-bold text-white"><Trash2 size={12} />Confirm</button>
+                    : <button onClick={() => setDeleteId(x.id)} className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-bold"><Trash2 size={12} />Delete</button>}
                 </td>
               </tr>
             ))}
@@ -245,6 +253,22 @@ export function Loads({ update }: { update: (x: Record<string, unknown>, m: stri
             </button>
           </form>
         </Modal>
+      )}
+
+      {viewLoad && <LoadDetails load={viewLoad} onClose={() => setViewLoad(null)} />}
+
+      {deleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-red-100 text-red-600"><Trash2 size={20} /></div>
+            <h2 className="heading mt-4 text-xl font-bold">Delete this load?</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">This permanently removes the load from the database. If it is linked to a trip, the deletion may be blocked.</p>
+            <div className="mt-6 flex gap-3">
+              <button onClick={() => setDeleteId('')} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold">Cancel</button>
+              <button onClick={() => void remove(deleteId)} className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-bold text-white">Delete</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

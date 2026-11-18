@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Banknote, Download, Plus, Send, X } from 'lucide-react';
+import { Banknote, CheckCircle2, Download, Plus, Send, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Panel, Empty, Table, Modal, Select, today, money } from '@/components/ui';
+import { Panel, Empty, Table, Modal, Select, Field, today, money } from '@/components/ui';
 import type { SupabaseDriver } from '@/components/Drivers';
 
 export type SupabaseTrip = {
@@ -11,6 +11,7 @@ export type SupabaseTrip = {
   driver_id: string;
   status: string;
   assigned_date: string;
+  advance_amount: number;
   freight_amount: number;
 };
 
@@ -162,12 +163,14 @@ function PaymentModal({ invoice, onClose, onDone }: { invoice: SupabaseInvoice; 
   const [amount, setAmount] = useState(String(Number(invoice.total_amount) - Number(invoice.paid_amount)));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const outstanding = Number(invoice.total_amount) - Number(invoice.paid_amount);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     const value = Number(amount);
     if (!reference.trim()) { setError('Enter the transaction ID from your payment app or bank statement.'); return; }
-    if (!Number.isFinite(value) || value <= 0) { setError('Enter a valid payment amount.'); return; }
+    if (!Number.isFinite(value) || value <= 0) { setError('Enter a valid payment amount greater than zero.'); return; }
+    if (value > outstanding) { setError(`The payment amount cannot exceed the outstanding balance of ${money(outstanding)}.`); return; }
     setSaving(true);
     const paidAt = new Date().toISOString();
     const newPaid = Number(invoice.paid_amount) + value;
@@ -186,13 +189,18 @@ function PaymentModal({ invoice, onClose, onDone }: { invoice: SupabaseInvoice; 
       .update({ paid_amount: newPaid, status: newStatus })
       .eq('id', invoice.id);
     setSaving(false);
-    if (invoiceError) { setError('Payment saved but the invoice total could not be updated.'); return; }
+    if (invoiceError) { setError('Payment saved but the invoice total could not be updated. Try refreshing the invoices page.'); return; }
     onDone(`Payment of ${money(value)} recorded for ${invoice.invoice_number}`);
     onClose();
   };
   return (
     <Modal title={`Record payment — ${invoice.invoice_number}`} onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
+        <div className="rounded-xl bg-slate-50 p-4 text-sm">
+          <div className="flex justify-between"><span className="text-slate-500">Invoice total</span><span className="font-bold">{money(Number(invoice.total_amount))}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Already paid</span><span className="font-bold">{money(Number(invoice.paid_amount))}</span></div>
+          <div className="flex justify-between border-t border-slate-200 pt-2"><span className="text-slate-500">Outstanding</span><span className="font-bold text-[#e87500]">{money(outstanding)}</span></div>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Select label="Payment method" value={method} onChange={setMethod}>
             <option value="upi">UPI</option>
@@ -203,7 +211,7 @@ function PaymentModal({ invoice, onClose, onDone }: { invoice: SupabaseInvoice; 
           </Select>
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Amount (₹)</span>
-            <input required type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)}
+            <input required type="number" min="1" max={outstanding} value={amount} onChange={e => setAmount(e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm outline-none focus:border-[#ffb000] focus:bg-white" />
           </label>
         </div>
@@ -221,6 +229,76 @@ function PaymentModal({ invoice, onClose, onDone }: { invoice: SupabaseInvoice; 
   );
 }
 
+function InvoiceEditModal({ invoice, onClose, onDone }: { invoice: SupabaseInvoice; onClose: () => void; onDone: (message: string) => void }) {
+  const [form, setForm] = useState({
+    freight: String(invoice.freight),
+    hamali: String(invoice.hamali),
+    other_charges: String(invoice.other_charges),
+    gst: String(invoice.gst),
+    advance: String(invoice.advance),
+    consignor: invoice.consignor ?? '',
+    consignee: invoice.consignee ?? '',
+    gc_number: invoice.gc_number ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const total = (() => {
+    const f = Number(form.freight) || 0;
+    const h = Number(form.hamali) || 0;
+    const o = Number(form.other_charges) || 0;
+    const g = Number(form.gst) || 0;
+    const a = Number(form.advance) || 0;
+    return f + h + o + g - a;
+  })();
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const freight = Number(form.freight);
+    if (!Number.isFinite(freight) || freight < 0) { setError('Freight must be a valid non-negative amount.'); return; }
+    setSaving(true);
+    const { error: updateError } = await supabase.from('invoices').update({
+      freight: Number(form.freight) || 0,
+      hamali: Number(form.hamali) || 0,
+      other_charges: Number(form.other_charges) || 0,
+      gst: Number(form.gst) || 0,
+      advance: Number(form.advance) || 0,
+      consignor: form.consignor.trim() || null,
+      consignee: form.consignee.trim() || null,
+      gc_number: form.gc_number.trim() || null,
+    }).eq('id', invoice.id);
+    setSaving(false);
+    if (updateError) { setError(updateError.message || 'Could not update the invoice.'); return; }
+    onDone('Invoice updated');
+    onClose();
+  };
+
+  return (
+    <Modal title={`Edit invoice ${invoice.invoice_number}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Consignor" value={form.consignor} onChange={v => setForm({ ...form, consignor: v })} placeholder="Sender name" required={false} />
+          <Field label="Consignee" value={form.consignee} onChange={v => setForm({ ...form, consignee: v })} placeholder="Receiver name" required={false} />
+          <Field label="GC number" value={form.gc_number} onChange={v => setForm({ ...form, gc_number: v })} placeholder="GC / GR number" required={false} />
+          <Field label="Freight (₹)" value={form.freight} onChange={v => setForm({ ...form, freight: v })} placeholder="0" type="number" />
+          <Field label="Hamali (₹)" value={form.hamali} onChange={v => setForm({ ...form, hamali: v })} placeholder="0" type="number" required={false} />
+          <Field label="Other charges (₹)" value={form.other_charges} onChange={v => setForm({ ...form, other_charges: v })} placeholder="0" type="number" required={false} />
+          <Field label="GST (₹)" value={form.gst} onChange={v => setForm({ ...form, gst: v })} placeholder="0" type="number" required={false} />
+          <Field label="Advance (₹)" value={form.advance} onChange={v => setForm({ ...form, advance: v })} placeholder="0" type="number" required={false} />
+        </div>
+        <div className="flex justify-between rounded-xl bg-[#fff7dc] px-4 py-3">
+          <span className="font-bold">Total payable</span><span className="font-bold">{money(total)}</span>
+        </div>
+        {error && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        <button disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ffb000] py-3 font-bold disabled:opacity-60">
+          {saving ? 'Saving...' : 'Save changes'}
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
 type SupabaseLoadLite = { id: string; from_city: string; to_city: string; goods: string; price: number; status: string | null };
 
 type TripsProps = { drivers: SupabaseDriver[]; onUpdate: (message: string) => void };
@@ -232,14 +310,18 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
   const [trips, setTrips] = useState<SupabaseTrip[]>([]);
   const [loads, setLoads] = useState<SupabaseLoadLite[]>([]);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ load_id: '', driver_id: '' });
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ load_id: '', driver_id: '', advance: '0' });
+  const [confirmComplete, setConfirmComplete] = useState<SupabaseTrip | null>(null);
 
   const fetchTrips = async () => {
+    setLoading(true);
     const [tripResult, loadResult] = await Promise.all([
       supabase.from('trips').select('*').order('created_at', { ascending: false }),
       supabase.from('loads').select('id, from_city, to_city, goods, price, status').order('created_at', { ascending: false }),
     ]);
-    if (tripResult.error) { setError('Trip data could not be loaded.'); return; }
+    setLoading(false);
+    if (tripResult.error) { setError('Trip data could not be loaded. Tap Refresh to try again.'); return; }
     if (loadResult.error) { setError('Load data could not be loaded.'); return; }
     setTrips(tripResult.data ?? []);
     setLoads(loadResult.data ?? []);
@@ -255,10 +337,14 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setFormError('');
-    setSaving(true);
     const load = loadFor(form.load_id);
-    if (!load) { setFormError('Select a load to assign.'); setSaving(false); return; }
-    const tripNumber = `TRP-${String(trips.length + 1001)}`;
+    if (!load) { setFormError('Select a load to assign.'); return; }
+    if (!form.driver_id) { setFormError('Select a driver.'); return; }
+    const advanceNum = Number(form.advance);
+    if (!Number.isFinite(advanceNum) || advanceNum < 0) { setFormError('Advance amount must be zero or a positive number.'); return; }
+
+    setSaving(true);
+    const tripNumber = `TRP-${Date.now().toString().slice(-6)}`;
     const { error: tripError } = await supabase
       .from('trips')
       .insert({
@@ -268,11 +354,13 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
         status: 'assigned',
         assigned_date: today(),
         freight_amount: Number(load.price) || 0,
+        advance_amount: advanceNum,
       });
     if (tripError) { setFormError(tripError.message || 'Could not assign the trip.'); setSaving(false); return; }
     await supabase.from('loads').update({ status: 'Confirmed' }).eq('id', form.load_id);
-    onUpdate('Trip assigned');
-    setForm({ load_id: '', driver_id: '' });
+    setSaving(false);
+    onUpdate('Trip assigned and load confirmed');
+    setForm({ load_id: '', driver_id: '', advance: '0' });
     setOpen(false);
     void fetchTrips();
   };
@@ -284,8 +372,11 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
     if (updateError) { setError('Could not update the trip status.'); return; }
     if (next === 'completed') {
       const load = loadFor(trip.load_id);
-      const invoiceNumber = `INV-${today().split('-').join('')}-${trips.filter(x => x.status === 'completed').length + 1}`;
+      const { data: invoiceCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true });
+      const seq = (invoiceCount ?? 0) + 1;
+      const invoiceNumber = `INV-${today().split('-').join('')}-${String(seq).padStart(3, '0')}-${Date.now().toString().slice(-4)}`;
       const freight = Number(trip.freight_amount) || Number(load?.price) || 0;
+      const advance = Number(trip.advance_amount) || 0;
       const { error: invoiceError } = await supabase.from('invoices').insert({
         invoice_number: invoiceNumber,
         trip_id: trip.id,
@@ -297,25 +388,44 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
         hamali: 0,
         other_charges: 0,
         gst: 0,
-        advance: 0,
+        advance,
         status: 'pending',
       });
-      if (invoiceError) { setError('Trip completed but the invoice could not be created.'); void fetchTrips(); return; }
+      if (invoiceError) {
+        setError('Trip was completed but the invoice could not be created. You can create one manually from the Invoices page.');
+        void fetchTrips();
+        return;
+      }
+      await supabase.from('notifications').insert({
+        title: 'Trip completed',
+        message: `Trip ${trip.trip_number} completed. Invoice ${invoiceNumber} generated.`,
+        category: 'trip_completed',
+        is_read: false,
+      });
       onUpdate('Trip completed and invoice created');
     } else {
-      onUpdate('Trip status updated');
+      onUpdate('Trip status updated to ongoing');
     }
+    void fetchTrips();
+  };
+
+  const cancelTrip = async (trip: SupabaseTrip) => {
+    const { error: cancelError } = await supabase.from('trips').update({ status: 'cancelled' }).eq('id', trip.id);
+    if (cancelError) { setError('Could not cancel the trip.'); return; }
+    await supabase.from('loads').update({ status: 'Available' }).eq('id', trip.load_id);
+    onUpdate('Trip cancelled and load returned to available');
     void fetchTrips();
   };
 
   const badge = (status: string) =>
     status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
     status === 'assigned' || status === 'ongoing' ? 'bg-amber-100 text-amber-700' :
+    status === 'cancelled' ? 'bg-red-100 text-red-700' :
     'bg-slate-100 text-slate-600';
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-[#e87500]">Movement tracking</p>
           <h2 className="heading mt-1 text-3xl font-bold">Trips Management</h2>
@@ -329,14 +439,16 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
         <button onClick={() => void fetchTrips()} className="text-xs font-bold text-[#e87500]">Refresh</button>
       }>
         {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        {trips.length ? (
+        {loading ? <Empty label="Loading trips..." /> : trips.length ? (
           <Table>
             <tr>
               <th className="px-4 py-3">Trip no.</th>
               <th className="px-4 py-3">Driver / owner</th>
               <th className="px-4 py-3">Route</th>
+              <th className="px-4 py-3">Freight</th>
+              <th className="px-4 py-3">Advance</th>
               <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Action</th>
+              <th className="px-4 py-3">Actions</th>
             </tr>
             {trips.map(x => {
               const load = loadFor(x.load_id);
@@ -345,11 +457,13 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
                   <td className="px-4 py-3 font-bold">{x.trip_number}</td>
                   <td className="px-4 py-3">{driverName(x.driver_id)}</td>
                   <td className="px-4 py-3">{load ? `${load.from_city} → ${load.to_city}` : '—'}</td>
+                  <td className="px-4 py-3">{money(Number(x.freight_amount))}</td>
+                  <td className="px-4 py-3">{money(Number(x.advance_amount))}</td>
                   <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${badge(x.status)}`}>{x.status}</span></td>
-                  <td className="px-4 py-3">
-                    {x.status !== 'completed' && x.status !== 'cancelled' && (
-                      <button onClick={() => void move(x)} className="rounded-lg bg-[#ffb000] px-3 py-1.5 text-xs font-bold">Advance status</button>
-                    )}
+                  <td className="flex flex-wrap gap-2 px-4 py-3">
+                    {x.status === 'assigned' && <button onClick={() => void move(x)} className="rounded-lg bg-[#ffb000] px-3 py-1.5 text-xs font-bold">Start trip</button>}
+                    {x.status === 'ongoing' && <button onClick={() => setConfirmComplete(x)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">Complete trip</button>}
+                    {(x.status === 'assigned' || x.status === 'ongoing') && <button onClick={() => void cancelTrip(x)} className="rounded-lg border px-3 py-1.5 text-xs font-bold">Cancel</button>}
                   </td>
                 </tr>
               );
@@ -367,18 +481,34 @@ export function Trips({ drivers, onUpdate }: TripsProps) {
                 <option key={x.id} value={x.id}>{x.from_city} to {x.to_city} — {x.goods}</option>
               ))}
             </Select>
+            {availableLoads.length === 0 && <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">No available loads. Post a load first, then assign it to a driver.</p>}
             <Select label="Driver / owner" value={form.driver_id} onChange={v => setForm({ ...form, driver_id: v })}>
               <option value="">Select a driver</option>
               {drivers.filter(x => x.account_status === 'active').map(x => (
                 <option key={x.id} value={x.id}>{x.full_name}</option>
               ))}
             </Select>
+            <Field label="Advance amount (₹)" value={form.advance} onChange={v => setForm({ ...form, advance: v })} placeholder="0" type="number" required={false} />
             {formError && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</div>}
             <button disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ffb000] py-3 font-bold disabled:opacity-60">
               {saving ? 'Saving...' : 'Create trip'}
             </button>
           </form>
         </Modal>
+      )}
+
+      {confirmComplete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 text-emerald-600"><CheckCircle2 size={20} /></div>
+            <h2 className="heading mt-4 text-xl font-bold">Complete this trip?</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">Completing trip {confirmComplete.trip_number} will automatically generate an invoice. This cannot be undone.</p>
+            <div className="mt-6 flex gap-3">
+              <button onClick={() => setConfirmComplete(null)} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold">Cancel</button>
+              <button onClick={() => { void move(confirmComplete); setConfirmComplete(null); }} className="flex-1 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white">Complete trip</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -390,16 +520,21 @@ export function Invoices({ onUpdate }: InvoicesProps) {
   const [invoices, setInvoices] = useState<SupabaseInvoice[]>([]);
   const [payments, setPayments] = useState<SupabasePayment[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState<SupabaseInvoice | null>(null);
   const [payTarget, setPayTarget] = useState<SupabaseInvoice | null>(null);
   const [whatsappTarget, setWhatsappTarget] = useState<SupabaseInvoice | null>(null);
+  const [editTarget, setEditTarget] = useState<SupabaseInvoice | null>(null);
+  const [deleteId, setDeleteId] = useState('');
 
   const fetchInvoices = async () => {
+    setLoading(true);
     const { data, error: fetchError } = await supabase
       .from('invoices')
       .select('*')
       .order('created_at', { ascending: false });
-    if (fetchError) { setError('Invoice data could not be loaded.'); return; }
+    setLoading(false);
+    if (fetchError) { setError('Invoice data could not be loaded. Tap Refresh to try again.'); return; }
     setInvoices((data ?? []) as SupabaseInvoice[]);
     setError('');
   };
@@ -426,9 +561,18 @@ export function Invoices({ onUpdate }: InvoicesProps) {
     void fetchPayments();
   };
 
+  const removeInvoice = async (invoiceId: string) => {
+    const { error: deleteError } = await supabase.from('invoices').delete().eq('id', invoiceId);
+    setDeleteId('');
+    if (deleteError) { setError('Could not delete the invoice. It may have payments linked to it.'); return; }
+    onUpdate('Invoice deleted');
+    void fetchInvoices();
+  };
+
   const badge = (status: string) =>
     status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
     status === 'overdue' ? 'bg-red-100 text-red-700' :
+    status === 'draft' ? 'bg-slate-100 text-slate-600' :
     'bg-amber-100 text-amber-700';
 
   return (
@@ -441,13 +585,14 @@ export function Invoices({ onUpdate }: InvoicesProps) {
         <button onClick={() => { void fetchInvoices(); void fetchPayments(); }} className="text-xs font-bold text-[#e87500]">Refresh</button>
       }>
         {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        {invoices.length ? (
+        {loading ? <Empty label="Loading invoices..." /> : invoices.length ? (
           <Table>
             <tr>
               <th className="px-4 py-3">Invoice no.</th>
               <th className="px-4 py-3">GC no.</th>
               <th className="px-4 py-3">Date</th>
               <th className="px-4 py-3">Total</th>
+              <th className="px-4 py-3">Paid</th>
               <th className="px-4 py-3">Transaction ID</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Actions</th>
@@ -460,13 +605,18 @@ export function Invoices({ onUpdate }: InvoicesProps) {
                   <td className="px-4 py-3">{x.gc_number ?? '—'}</td>
                   <td className="px-4 py-3">{x.invoice_date}</td>
                   <td className="px-4 py-3">{money(x.total_amount)}</td>
+                  <td className="px-4 py-3">{money(x.paid_amount)}</td>
                   <td className="px-4 py-3">{payment?.reference ?? '—'}</td>
-                  <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${badge(x.status)}`}>{x.status}</span></td>
+                  <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${badge(x.status)}`}>{x.status.replace('_', ' ')}</span></td>
                   <td className="flex flex-wrap gap-2 px-4 py-3">
                     <button onClick={() => setPreview(x)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">View</button>
                     <button onClick={() => downloadInvoicePdf(x, payment)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">PDF</button>
+                    <button onClick={() => setEditTarget(x)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Edit</button>
                     <button onClick={() => setWhatsappTarget(x)} className="flex items-center gap-1 rounded-lg bg-[#25D366] px-2.5 py-1.5 text-xs font-bold text-white"><Send size={12} />WhatsApp</button>
                     {x.status !== 'paid' && <button onClick={() => openPaymentModal(x)} className="rounded-lg bg-[#ffb000] px-2.5 py-1.5 text-xs font-bold">Record payment</button>}
+                    {x.status !== 'paid' && (deleteId === x.id
+                      ? <button onClick={() => void removeInvoice(x.id)} className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white">Confirm delete</button>
+                      : <button onClick={() => setDeleteId(x.id)} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold">Delete</button>)}
                   </td>
                 </tr>
               );
@@ -480,6 +630,9 @@ export function Invoices({ onUpdate }: InvoicesProps) {
       )}
       {payTarget && (
         <PaymentModal invoice={payTarget} onClose={() => setPayTarget(null)} onDone={onPaymentDone} />
+      )}
+      {editTarget && (
+        <InvoiceEditModal invoice={editTarget} onClose={() => setEditTarget(null)} onDone={onUpdate} />
       )}
 
       {preview && (
@@ -505,6 +658,12 @@ export function Invoices({ onUpdate }: InvoicesProps) {
               </div>
               <div className="flex justify-between bg-[#fff7dc] px-4 py-3 text-base">
                 <span className="font-bold">Total payable</span><span className="font-bold">{money(Number(preview.total_amount))}</span>
+              </div>
+              <div className="flex justify-between border-t border-slate-100 px-4 py-2.5">
+                <span className="text-slate-500">Paid</span><span className="font-semibold text-emerald-600">{money(Number(preview.paid_amount))}</span>
+              </div>
+              <div className="flex justify-between px-4 py-2.5">
+                <span className="text-slate-500">Balance due</span><span className="font-bold text-[#e87500]">{money(Number(preview.total_amount) - Number(preview.paid_amount))}</span>
               </div>
             </div>
             {(() => {
