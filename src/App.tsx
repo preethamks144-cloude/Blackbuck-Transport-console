@@ -23,7 +23,7 @@ const nav: { id: Page; label: string; icon: LucideIcon }[] = [
 ];
 const tone = (status: string) => ['active', 'completed', 'paid', 'confirmed'].includes(status) ? 'green' : ['published', 'pending', 'ongoing', 'assigned', 'available'].includes(status) ? 'yellow' : ['expired', 'overdue', 'cancelled', 'restricted'].includes(status) ? 'red' : 'neutral';
 
-type LiveDrivers = { drivers: SupabaseDriver[]; trips: SupabaseTrip[]; invoices: SupabaseInvoice[] };
+type LiveDrivers = { drivers: SupabaseDriver[]; trips: SupabaseTrip[]; invoices: SupabaseInvoice[]; subs: SupabaseSubscription[] };
 
 function Logo() { return <svg className="h-11 w-[190px] rounded bg-white px-1" viewBox="0 0 2048 684" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Blackbuck Transport logo"><rect width="2048" height="684" fill="transparent" /><g transform="translate(0 35) scale(1.55)"><path fill="#050505" fillRule="evenodd" d="M574,118 L567,112 L547,100 L534,87 L526,83 L518,82 L507,65 L494,53 L477,45 L464,35 L450,29 L430,17 L443,30 L466,46 L472,52 L483,57 L492,63 L509,80 L515,81 L514,82 L502,82 L482,67 L459,58 L443,59 L435,52 L409,51 L389,46 L372,40 L379,45 L406,57 L419,60 L431,60 L438,67 L441,68 L455,68 L456,67 L480,82 L483,86 L482,87 L472,84 L453,84 L441,86 L453,96 L466,100 L472,100 L474,102 L459,113 L417,155 L388,167 L363,175 L337,181 L301,186 L263,188 L244,191 L225,197 L214,203 L202,205 L187,205 L172,201 L173,207 L177,212 L186,216 L195,217 L184,232 L176,248 L165,259 L148,268 L134,272 L126,272 L118,274 L91,310 L75,325 L68,328 L63,333 L60,340 L48,351 L41,360 L40,364 L50,363 L78,347 L96,334 L131,304 L143,296 L151,292 L168,287 L187,284 L208,283 L226,278 L243,267 L259,253 L271,248 L283,246 L310,246 L375,254 L397,253 L414,249 L405,248 L399,250 L381,250 L359,247 L320,237 L299,234 L297,232 L303,230 L334,230 L358,233 L391,233 L403,228 L414,244 L420,247 L433,248 L460,242 L501,228 L513,226 L514,227 L511,233 L495,254 L480,269 L473,270 L471,273 L460,277 L449,290 L445,300 L450,299 L473,287 L489,275 L492,276 L491,278 L491,284 L504,277 L516,267 L552,221 L553,210 L548,203 L539,199 L514,201 L481,207 L467,208 L466,210 L486,209 L502,211 L497,213 L489,213 L464,218 L440,226 L439,223 L445,214 L451,200 L451,191 L445,176 L447,175 L454,180 L458,181 L464,169 L480,144 L497,124 L503,128 L512,131 L541,129 L559,132 L564,130 L573,123 Z M522,241 L523,242 L509,261 L505,261 L504,259 Z M307,195 L296,197 L269,198 L243,203 L223,210 L210,217 L201,224 L199,223 L205,215 L219,203 L238,195 L256,192 L296,192 L305,193 Z M491,110 L492,109 L496,112 L509,116 L533,116 L546,118 L560,118 L568,126 L561,131 L554,131 L551,129 L549,130 L546,129 L510,129 L500,125 L494,119 L491,113 Z M513,93 L514,92 L525,93 L529,96 L530,99 L528,101 L521,100 Z" /><g fill="#FFB000" fillRule="evenodd"><path d="M302,232 L315,234 L328,238 L344,239 L366,239 L345,236 L331,232 Z" /><path d="M513,132 L509,132 L503,129 L493,143 L479,172 L467,206 L478,205 L494,165 L504,145 Z" /><path d="M385,132 L346,127 L298,128 L267,133 L247,138 L221,147 L187,164 L160,184 L139,205 L130,216 L119,233 L140,213 L169,192 L195,177 L237,158 L267,148 L312,138 L355,133 L384,133 Z" /><path d="M403,109 L383,103 L350,97 L316,95 L288,94 L256,97 L224,103 L205,108 L166,122 L141,134 L115,150 L91,169 L74,186 L60,203 L43,229 L28,259 L22,276 L33,259 L54,232 L88,198 L115,177 L137,163 L187,138 L216,127 L243,119 L275,112 L315,107 L333,107 L366,106 L387,107 Z" /></g></g><text x="965" y="358" fill="#050505" fontFamily="Arial, Helvetica, sans-serif" fontSize="190" fontWeight="900" fontStyle="italic" letterSpacing="-8">Blackbuck</text><text x="965" y="538" fill="#FFB000" fontFamily="Arial, Helvetica, sans-serif" fontSize="190" fontWeight="900" fontStyle="italic" letterSpacing="-9">Transport</text></svg> }
 function Badge({ children }: { children: string }) { const styles = { green: 'bg-emerald-100 text-emerald-700', yellow: 'bg-amber-100 text-amber-700', red: 'bg-red-100 text-red-700', neutral: 'bg-slate-100 text-slate-600' }; const kind = tone(children) as keyof typeof styles; return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${styles[kind]}`}>{children.replace('_', ' ')}</span> }
@@ -36,7 +36,128 @@ function Login({ onLogin }: { onLogin: () => void }) { const [email, setEmail] =
 
 function ProfilePage({ adminName, onNameChange }: { adminName: string; onNameChange: (name: string) => void }) { const [name, setName] = useState(adminName); const [message, setMessage] = useState(''); const saveName = (event: FormEvent) => { event.preventDefault(); const next = name.trim() || 'Admin User'; setName(next); onNameChange(next); localStorage.setItem(NAME_KEY, next); setMessage('Profile updated successfully'); }; return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Administrator account</p><h2 className="heading mt-1 text-3xl font-bold">My Profile</h2><p className="mt-1 text-sm text-slate-500">Manage your personal details and sign-in information.</p></div><Panel title="Profile information" action={<button form="profile-form" className="rounded-lg bg-[#ffb000] px-3 py-2 text-xs font-bold">Save changes</button>}><form id="profile-form" onSubmit={saveName} className="space-y-5"><div className="flex items-center gap-4 border-b border-slate-100 pb-5"><div className="flex h-16 w-16 items-center justify-center rounded-full bg-black text-2xl font-bold text-[#ffb000]">{name.trim().charAt(0).toUpperCase() || 'A'}</div><div><p className="heading text-xl font-bold">{name.trim() || 'Admin User'}</p><p className="text-sm text-slate-500">Administrator</p></div></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Admin name" value={name} onChange={setName} placeholder="Admin User" /><Field label="Email address" value={LOGIN_EMAIL} onChange={() => undefined} placeholder={LOGIN_EMAIL} type="email" /></div><div className="grid gap-5 sm:grid-cols-2"><Info label="Login password" value={LOGIN_PASSWORD} /><Info label="Environment" value="Connected to Supabase" /><Info label="Data storage" value="Supabase (loads, drivers, trips, invoices)" /></div></form></Panel>{message && <div className="flex items-center gap-2 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-700"><CheckCircle2 size={17} />{message}</div>}</div> }
 
-function Dashboard({ data, loads, adminName, loading, error }: { data: LiveDrivers; loads: LiveLoad[]; adminName: string; loading: boolean; error: string }) { const paid = data.invoices.reduce((sum, item) => sum + item.paid_amount, 0); const activeLoads = loads.filter(x => ['Available', 'Confirmed'].includes(x.status ?? 'Available')).length; return <div className="space-y-6"><div><p className="text-sm font-semibold text-[#e87500]">Operations overview</p><h2 className="heading mt-1 text-3xl font-bold">Good morning, {adminName.split(' ')[0]}.</h2><p className="mt-1 text-sm text-slate-500">Live figures from your Supabase database.</p></div>{error && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric icon={Users} label="Registered drivers" value={loading ? '…' : data.drivers.length} /><Metric icon={Package} label="Active loads" value={loading ? '…' : activeLoads} accent="blue" /><Metric icon={Route} label="Active trips" value={loading ? '…' : data.trips.filter(x => ['assigned', 'ongoing'].includes(x.status)).length} accent="green" /><Metric icon={CircleDollarSign} label="Paid revenue" value={loading ? '…' : money(paid)} /></div><div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]"><Panel title="Recent load activity">{loading ? <Empty label="Loading live data..." /> : loads.length ? <Table><tr><th className="px-4 py-3">Route</th><th className="px-4 py-3">Goods</th><th className="px-4 py-3">Price</th><th className="px-4 py-3">Status</th></tr>{loads.slice(0, 5).map(x => <tr key={x.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold">{x.from_city} → {x.to_city}</td><td className="px-4 py-3">{x.goods}</td><td className="px-4 py-3">{money(Number(x.price))}</td><td className="px-4 py-3"><Badge>{(x.status ?? 'Available').toLowerCase()}</Badge></td></tr>)}</Table> : <Empty label="No load activity yet" />}</Panel><Panel title="Workspace readiness"><div className="space-y-3"><div className="rounded-xl bg-emerald-50 p-4"><p className="font-bold text-emerald-800">Supabase connected</p><p className="mt-1 text-sm text-emerald-700">Loads, drivers, trips and invoices are saved in your database and reload from it on every visit.</p></div><div className="rounded-xl bg-[#fff7dc] p-4 text-sm text-slate-600"><AlertCircle className="mr-2 inline text-[#e87500]" size={16} />Start by posting a load or adding a driver.</div></div></Panel></div></div> }
+function StatCard({ icon: Icon, label, value, hint, accent = 'amber', onClick }: { icon: LucideIcon; label: string; value: string | number; hint?: string; accent?: 'amber' | 'green' | 'blue' | 'red'; onClick?: () => void }) {
+  const accents = { amber: 'bg-amber-50 text-[#e87500]', green: 'bg-emerald-50 text-emerald-600', blue: 'bg-blue-50 text-blue-600', red: 'bg-red-50 text-red-600' };
+  return (
+    <button onClick={onClick} className="group flex w-full items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-[#ffb000] hover:shadow-md">
+      <div className={`inline-flex rounded-xl p-2.5 ${accents[accent]}`}><Icon size={20} /></div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-slate-500">{label}</p>
+        <p className="heading mt-1 text-2xl font-bold">{value}</p>
+        {hint && <p className="mt-1 truncate text-xs text-slate-400">{hint}</p>}
+      </div>
+      {onClick && <ChevronDown size={16} className="mt-1 -rotate-90 text-slate-300 transition group-hover:text-[#e87500]" />}
+    </button>
+  );
+}
+
+function SectionRow({ label, value }: { label: string; value: string }) {
+  return <div className="flex items-center justify-between border-b border-slate-100 py-2.5 last:border-0"><span className="text-sm text-slate-500">{label}</span><span className="font-semibold">{value}</span></div>;
+}
+
+function QuickLink({ icon: Icon, label, hint, onClick }: { icon: LucideIcon; label: string; hint: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-[#ffb000] hover:bg-amber-50/40">
+      <div className="inline-flex rounded-lg bg-slate-100 p-2 text-slate-600"><Icon size={18} /></div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold">{label}</p>
+        <p className="mt-0.5 truncate text-xs text-slate-400">{hint}</p>
+      </div>
+      <ChevronDown size={15} className="-rotate-90 text-slate-300" />
+    </button>
+  );
+}
+
+function Dashboard({ data, loads, adminName, loading, error, onNavigate }: { data: LiveDrivers; loads: LiveLoad[]; adminName: string; loading: boolean; error: string; onNavigate: (p: Page) => void }) {
+  const paid = data.invoices.reduce((sum, item) => sum + item.paid_amount, 0);
+  const outstanding = data.invoices.reduce((sum, item) => sum + (item.total_amount - item.paid_amount), 0);
+  const activeLoads = loads.filter(x => ['Available', 'Confirmed'].includes(x.status ?? 'Available')).length;
+  const activeTrips = data.trips.filter(x => ['assigned', 'ongoing'].includes(x.status)).length;
+  const completedTrips = data.trips.filter(x => x.status === 'completed').length;
+  const activeSubs = data.subs.filter(x => x.status === 'Active').length;
+  const pendingSubs = data.subs.filter(x => x.status === 'Pending').length;
+  const subValue = data.subs.filter(x => x.status === 'Active').reduce((s, x) => s + Number(x.price), 0);
+  const activeDrivers = data.drivers.filter(x => x.account_status === 'active').length;
+  const recentTrips = data.trips.slice(0, 5);
+  const recentInvoices = data.invoices.slice(0, 5);
+  const greet = (() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })();
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[#e87500]">Operations overview</p>
+          <h2 className="heading mt-1 text-3xl font-bold">{greet}, {adminName.split(' ')[0]}.</h2>
+          <p className="mt-1 text-sm text-slate-500">A simple snapshot of everything in your transport business.</p>
+        </div>
+        <button onClick={() => onNavigate('loads')} className="flex items-center gap-2 rounded-xl bg-[#ffb000] px-4 py-3 text-sm font-bold"><Plus size={17} />Post a load</button>
+      </div>
+
+      {error && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard icon={Users} label="Drivers & owners" value={loading ? '…' : data.drivers.length} hint={`${activeDrivers} active`} accent="amber" onClick={() => onNavigate('drivers')} />
+        <StatCard icon={Package} label="Loads" value={loading ? '…' : loads.length} hint={`${activeLoads} available or confirmed`} accent="blue" onClick={() => onNavigate('loads')} />
+        <StatCard icon={Route} label="Trips" value={loading ? '…' : data.trips.length} hint={`${activeTrips} in progress · ${completedTrips} completed`} accent="green" onClick={() => onNavigate('trips')} />
+        <StatCard icon={CircleDollarSign} label="Paid revenue" value={loading ? '…' : money(paid)} hint={`${money(outstanding)} still outstanding`} accent="green" onClick={() => onNavigate('payments')} />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Panel title="Billing at a glance" action={<button onClick={() => onNavigate('invoices')} className="text-xs font-bold text-[#e87500]">Open invoices</button>}>
+          <SectionRow label="Total invoices" value={loading ? '…' : String(data.invoices.length)} />
+          <SectionRow label="Paid revenue" value={loading ? '…' : money(paid)} />
+          <SectionRow label="Outstanding balance" value={loading ? '…' : money(outstanding)} />
+          <SectionRow label="Active subscriptions" value={loading ? '…' : `${activeSubs} active · ${pendingSubs} pending`} />
+          <SectionRow label="Subscription value" value={loading ? '…' : money(subValue)} />
+        </Panel>
+
+        <Panel title="Quick actions" action={<span className="text-xs text-slate-400">Tap to jump</span>}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <QuickLink icon={Package} label="Loads" hint="Post and manage freight listings" onClick={() => onNavigate('loads')} />
+            <QuickLink icon={Users} label="Drivers & owners" hint="Add and manage drivers" onClick={() => onNavigate('drivers')} />
+            <QuickLink icon={Route} label="Trips" hint="Assign loads and track movement" onClick={() => onNavigate('trips')} />
+            <QuickLink icon={CreditCard} label="Subscriptions" hint="Membership plans and renewals" onClick={() => onNavigate('subscriptions')} />
+            <QuickLink icon={FileText} label="Invoices" hint="Billing and invoice records" onClick={() => onNavigate('invoices')} />
+            <QuickLink icon={Wallet} label="Payments" hint="Collections and reconciliation" onClick={() => onNavigate('payments')} />
+          </div>
+        </Panel>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Panel title="Recent trips" action={<button onClick={() => onNavigate('trips')} className="text-xs font-bold text-[#e87500]">View all</button>}>
+          {loading ? <Empty label="Loading live data..." /> : recentTrips.length ? (
+            <Table>
+              <tr><th className="px-4 py-3">Trip no.</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Freight</th></tr>
+              {recentTrips.map(x => (
+                <tr key={x.id} className="border-t border-slate-100">
+                  <td className="px-4 py-3 font-bold">{x.trip_number}</td>
+                  <td className="px-4 py-3"><Badge>{x.status}</Badge></td>
+                  <td className="px-4 py-3">{money(Number(x.freight_amount))}</td>
+                </tr>
+              ))}
+            </Table>
+          ) : <Empty label="No trips yet. Assign a load to a driver to begin." />}
+        </Panel>
+
+        <Panel title="Recent invoices" action={<button onClick={() => onNavigate('invoices')} className="text-xs font-bold text-[#e87500]">View all</button>}>
+          {loading ? <Empty label="Loading live data..." /> : recentInvoices.length ? (
+            <Table>
+              <tr><th className="px-4 py-3">Invoice no.</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Total</th><th className="px-4 py-3">Status</th></tr>
+              {recentInvoices.map(x => (
+                <tr key={x.id} className="border-t border-slate-100">
+                  <td className="px-4 py-3 font-bold">{x.invoice_number}</td>
+                  <td className="px-4 py-3">{x.invoice_date}</td>
+                  <td className="px-4 py-3">{money(Number(x.total_amount))}</td>
+                  <td className="px-4 py-3"><Badge>{x.status}</Badge></td>
+                </tr>
+              ))}
+            </Table>
+          ) : <Empty label="No invoices yet. They are created when trips complete." />}
+        </Panel>
+      </div>
+    </div>
+  );
+}
 
 export type SupabaseSubscription = {
   id: string;
@@ -140,6 +261,7 @@ function App() {
   const [drivers, setDrivers] = useState<SupabaseDriver[]>([]);
   const [trips, setTrips] = useState<SupabaseTrip[]>([]);
   const [invoices, setInvoices] = useState<SupabaseInvoice[]>([]);
+  const [subs, setSubs] = useState<SupabaseSubscription[]>([]);
   const [liveError, setLiveError] = useState('');
   const [liveLoading, setLiveLoading] = useState(true);
   const [notices, setNotices] = useState<Notice[]>(() => { try { return JSON.parse(localStorage.getItem(NOTICES_KEY) || '[]') as Notice[]; } catch { return []; } });
@@ -149,19 +271,21 @@ function App() {
 
   const refresh = useCallback(async () => {
     setLiveLoading(true);
-    const [loadResult, driverResult, tripResult, invoiceResult] = await Promise.all([
+    const [loadResult, driverResult, tripResult, invoiceResult, subResult] = await Promise.all([
       supabase.from('loads').select('*').order('created_at', { ascending: false }),
       supabase.from('drivers').select('*').order('created_at', { ascending: false }),
       supabase.from('trips').select('*').order('created_at', { ascending: false }),
       supabase.from('invoices').select('*').order('created_at', { ascending: false }),
+      supabase.from('subscriptions').select('*').order('created_at', { ascending: false }),
     ]);
-    if (loadResult.error || driverResult.error || tripResult.error || invoiceResult.error) {
+    if (loadResult.error || driverResult.error || tripResult.error || invoiceResult.error || subResult.error) {
       setLiveError('Live data could not be loaded from the database. Check your connection and try Refresh.');
     } else {
       setLoads((loadResult.data ?? []) as LiveLoad[]);
       setDrivers((driverResult.data ?? []) as SupabaseDriver[]);
       setTrips((tripResult.data ?? []) as SupabaseTrip[]);
       setInvoices((invoiceResult.data ?? []) as SupabaseInvoice[]);
+      setSubs((subResult.data ?? []) as SupabaseSubscription[]);
       setLiveError('');
     }
     setLiveLoading(false);
@@ -171,13 +295,13 @@ function App() {
 
   if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
   const title = page === 'profile' ? 'Profile' : nav.find(item => item.id === page)?.label || 'Dashboard';
-  const liveData = { drivers, trips, invoices };
+  const liveData = { drivers, trips, invoices, subs };
   const showToast = (message: string) => setToast(message);
   const updateNotices = (next: Partial<{ notifications: Notice[] }>, message: string) => { setNotices(current => ({ notifications: current, ...next }).notifications as Notice[]); setToast(message); };
   const update = (next: Partial<{ notifications: Notice[] }>, message: string) => { updateNotices(next, message); void refresh(); };
   const logout = () => { localStorage.removeItem(SESSION_KEY); setLoggedIn(false); setConfirmLogout(false); };
   const askLogout = () => setConfirmLogout(true);
-  const content = page === 'dashboard' ? <Dashboard data={liveData} loads={loads} adminName={adminName} loading={liveLoading} error={liveError} />
+  const content = page === 'dashboard' ? <Dashboard data={liveData} loads={loads} adminName={adminName} loading={liveLoading} error={liveError} onNavigate={setPage} />
     : page === 'profile' ? <ProfilePage adminName={adminName} onNameChange={setAdminName} />
     : page === 'loads' ? <Loads update={update} />
     : page === 'drivers' ? <Drivers onUpdate={showToast} onDriverChange={setDrivers} />
